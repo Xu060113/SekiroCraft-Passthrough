@@ -15,7 +15,7 @@ public abstract class InputUtilMixin {
             return;
         var s = BridgeClient.state();
         if (key == GLFW.GLFW_KEY_LEFT_SHIFT || key == GLFW.GLFW_KEY_RIGHT_SHIFT)
-            cir.setReturnValue(s.key(16));
+            cir.setReturnValue(MinecraftClient.getInstance().currentScreen != null ? s.key(16) : s.key(18));
         else if (key == GLFW.GLFW_KEY_LEFT_CONTROL || key == GLFW.GLFW_KEY_RIGHT_CONTROL)
             cir.setReturnValue(s.key(17));
         else if (key == GLFW.GLFW_KEY_LEFT_ALT || key == GLFW.GLFW_KEY_RIGHT_ALT)

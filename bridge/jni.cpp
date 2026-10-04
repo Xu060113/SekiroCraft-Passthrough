@@ -56,4 +56,12 @@ JNIEXPORT jboolean JNICALL Java_dev_sekirobridge_NativeBridge_status(JNIEnv *, j
 JNIEXPORT jlong JNICALL Java_dev_sekirobridge_NativeBridge_clockMs(JNIEnv *, jclass) {
     return GetTickCount64();
 }
+JNIEXPORT jboolean JNICALL Java_dev_sekirobridge_NativeBridge_physics(JNIEnv *env, jclass, jlong handle,
+                                                                      jobject buffer) {
+    if (!handle || !buffer || env->GetDirectBufferCapacity(buffer) < jlong(sizeof(bridge::PhysicsPacket)))
+        return false;
+    auto bytes = env->GetDirectBufferAddress(buffer); if (!bytes) return false;
+    bridge::PhysicsPacket p; std::memcpy(&p, bytes, sizeof(p));
+    return reinterpret_cast<bridge::SharedMemory *>(handle)->physics.write(p);
+}
 }

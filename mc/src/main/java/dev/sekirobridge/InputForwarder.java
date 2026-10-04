@@ -8,10 +8,12 @@ import dev.sekirobridge.mixin.KeyboardInvoker;
 import org.lwjgl.glfw.GLFW;
 
 final class InputForwarder {
-    private final boolean[] pressed = new boolean[256];
+    private final int[] pressed = new int[256];
     private int buttons, wheel;
     private long textSequence, epoch;
     private boolean initialized;
+    private boolean flyKey, ownsFlight, oldFlying;
+    private net.minecraft.client.network.ClientPlayerEntity flyingPlayer;
     static int glfwKey(int vk) {
         if (vk >= 48 && vk <= 57 || vk >= 65 && vk <= 90)
             return vk;
@@ -61,21 +63,44 @@ final class InputForwarder {
             textSequence = s.textSequence();
         }
         boolean screen = c.currentScreen != null, edit = (s.flags() & Protocol.EDIT) != 0;
-        int mods = (s.key(16) ? GLFW.GLFW_MOD_SHIFT : 0) | (s.key(17) ? GLFW.GLFW_MOD_CONTROL : 0) |
-                   (s.key(18) ? GLFW.GLFW_MOD_ALT : 0);
+        boolean flightAvailable = edit && (s.capabilities() & 128) != 0 && c.player.isCreative() && c.player.getAbilities().allowFlying;
+        boolean f6 = s.key(117);
+        if (flightAvailable && !screen && f6 && !flyKey) {
+            if (!ownsFlight) {
+                ownsFlight = true; flyingPlayer = c.player;
+                oldFlying = c.player.getAbilities().flying;
+            }
+            c.player.getAbilities().flying = !c.player.getAbilities().flying;
+            c.player.fallDistance = 0;
+            c.player.sendAbilitiesUpdate();
+        }
+        flyKey = f6;
+        if (!flightAvailable) releaseFlight();
+        int mods = ((screen ? s.key(16) : s.key(18)) ? GLFW.GLFW_MOD_SHIFT : 0) |
+                   (s.key(17) ? GLFW.GLFW_MOD_CONTROL : 0) | (screen && s.key(18) ? GLFW.GLFW_MOD_ALT : 0);
         for (int vk = 8; vk < 256; ++vk) {
             // WASD and camera movement belong to Sekiro. In screens, forward their UI key events.
             boolean allowed =
                 screen ||
-                (edit && (vk == 69 || vk == 81 || vk == 70 || vk >= 49 && vk <= 57 || vk == 16 || vk == 17));
+                (edit && (vk == 73 || vk == 79 || vk == 74 || vk >= 49 && vk <= 57 || vk == 18 || vk == 17));
             int key = glfwKey(vk);
             if (key == GLFW.GLFW_KEY_UNKNOWN)
                 continue;
             boolean down = allowed && s.key(vk);
-            if (down != pressed[vk]) {
-                pressed[vk] = down;
+            // Retain the key chosen at press until release, even if that press
+            // opens a screen. Otherwise E stays held while I is released.
+            if (!down && pressed[vk] != 0) {
                 ((KeyboardInvoker)c.keyboard)
-                    .bridgeKey(window, key, 0, down ? GLFW.GLFW_PRESS : GLFW.GLFW_RELEASE, mods);
+                    .bridgeKey(window, pressed[vk], 0, GLFW.GLFW_RELEASE, mods);
+                pressed[vk] = 0;
+            } else if (down && pressed[vk] == 0) {
+                boolean inventory = c.currentScreen instanceof net.minecraft.client.gui.screen.ingame.InventoryScreen ||
+                    c.currentScreen instanceof net.minecraft.client.gui.screen.ingame.CreativeInventoryScreen;
+                if (!screen || inventory && vk == 73)
+                    key = vk == 73 ? GLFW.GLFW_KEY_E : vk == 79 ? GLFW.GLFW_KEY_Q : vk == 74 ? GLFW.GLFW_KEY_F :
+                        vk == 18 ? GLFW.GLFW_KEY_LEFT_SHIFT : key;
+                pressed[vk] = key;
+                ((KeyboardInvoker)c.keyboard).bridgeKey(window, key, 0, GLFW.GLFW_PRESS, mods);
             }
         }
         // Mouse coordinates in the actual MC window; its GUI scale is handled by vanilla Mouse.
@@ -108,6 +133,8 @@ final class InputForwarder {
             c.player.input.movementForward = c.player.input.movementSideways = 0;
     }
     void release() {
+        releaseFlight();
+        flyKey = false;
         if (!initialized)
             return;
         var c = MinecraftClient.getInstance();
@@ -115,9 +142,9 @@ final class InputForwarder {
             return;
         long w = c.getWindow().getHandle();
         for (int vk = 8; vk < 256; ++vk)
-            if (pressed[vk]) {
-                pressed[vk] = false;
-                int key = glfwKey(vk);
+            if (pressed[vk] != 0) {
+                int key = pressed[vk];
+                pressed[vk] = 0;
                 if (key != GLFW.GLFW_KEY_UNKNOWN)
                     ((KeyboardInvoker)c.keyboard).bridgeKey(w, key, 0, GLFW.GLFW_RELEASE, 0);
             }
@@ -131,5 +158,12 @@ final class InputForwarder {
             c.options.attackKey.setPressed(false);
             c.options.useKey.setPressed(false);
         }
+    }
+    private void releaseFlight() {
+        if (ownsFlight && flyingPlayer != null) {
+            flyingPlayer.getAbilities().flying = oldFlying;
+            flyingPlayer.sendAbilitiesUpdate();
+        }
+        ownsFlight = false; flyingPlayer = null;
     }
 }

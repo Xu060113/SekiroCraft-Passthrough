@@ -9,6 +9,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(GameRenderer.class)
 public abstract class GameRendererMixin {
+    @Inject(method = "updateTargetedEntity(F)V", at = @At("RETURN"))
+    private void target(float tickDelta, CallbackInfo ci) {
+        dev.sekirobridge.InteractionRay.update();
+    }
     @Inject(method = "render", at = @At("HEAD"))
     private void begin(CallbackInfo ci) {
         BridgeClient.renderBegin();

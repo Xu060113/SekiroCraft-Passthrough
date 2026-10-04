@@ -96,11 +96,12 @@ int main() {
         device.type = DI8DEVTYPE_KEYBOARD;
         std::array<unsigned char, 256> keyboard{};
         check(sc::input::stateHook<0>(&device, keyboard.size(), keyboard.data()) == S_OK &&
-                  keyboard[DIK_E] == 0 && keyboard[DIK_Q] == 0 && keyboard[DIK_F] == 0 &&
+                  keyboard[DIK_I] == 0 && keyboard[DIK_O] == 0 && keyboard[DIK_J] == 0 &&
+                  keyboard[DIK_E] == 0x80 && keyboard[DIK_Q] == 0x80 && keyboard[DIK_F] == 0x80 &&
                   keyboard[DIK_1] == 0 && keyboard[DIK_9] == 0 && keyboard[DIK_W] == 0x80 &&
                   keyboard[DIK_LSHIFT] == 0x80,
               "MC keys isolated while host movement remains");
-        events[0].dwOfs = DIK_E;
+        events[0].dwOfs = DIK_I;
         events[1].dwOfs = DIK_W;
         count = 4;
         check(sc::input::dataHook<0>(&device, sizeof(events[0]), events, &count, 0) == S_OK && count == 1 &&
@@ -117,6 +118,13 @@ int main() {
         check(sc::input::stateHook<0>(&device, bytes.size(), bytes.data()) == S_OK && bytes[0] == 0x80,
               "MC edit mode leaves gamepads untouched");
         sc::input::mcEdit = false;
+        sc::input::flying = true;
+        device.type = DI8DEVTYPE_KEYBOARD;
+        check(sc::input::stateHook<0>(&device, keyboard.size(), keyboard.data()) == S_OK &&
+                  keyboard[DIK_W] == 0 && keyboard[DIK_SPACE] == 0 && keyboard[DIK_LSHIFT] == 0 &&
+                  keyboard[DIK_E] == 0x80 && keyboard[DIK_I] == 0x80,
+              "flight movement isolated while other host keys remain");
+        sc::input::flying = false;
         check(MH_Initialize() == MH_OK, "MinHook init");
         check(sc::input::install(), "real system DirectInput hook installation");
         // This creates system devices but never acquires, reads a user's keystroke,

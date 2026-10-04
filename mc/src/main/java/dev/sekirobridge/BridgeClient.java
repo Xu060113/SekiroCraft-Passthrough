@@ -28,6 +28,7 @@ public final class BridgeClient implements ClientModInitializer {
     public static final FrameExporter FRAMES = new FrameExporter();
     private static final InputForwarder INPUT = new InputForwarder();
     private static final PlayerSync PLAYERS = new PlayerSync();
+    private static final PhysicsExporter PHYSICS = new PhysicsExporter();
     public static Protocol.State state() { return state; }
     public static long handle() { return handle; }
     public static boolean armed() { return armed && handle != 0; }
@@ -58,7 +59,9 @@ public final class BridgeClient implements ClientModInitializer {
             FRAMES.discard();
         }
         if (handle != 0)
-            NativeBridge.status(handle, active() ? (1 | (client.currentScreen != null ? 2 : 0)) : 0,
+            NativeBridge.status(handle, active() ? (1 | (client.currentScreen != null ? 2 : 0) |
+                (client.player != null && client.player.getAbilities().flying &&
+                 (state.capabilities() & 128) != 0 ? 4 : 0)) : 0,
                                 state != null ? state.epoch() : 0);
     }
     public static void renderBegin() {
@@ -140,6 +143,13 @@ public final class BridgeClient implements ClientModInitializer {
             if (active()) {
                 PLAYERS.client(state);
                 INPUT.update(state);
+            }
+        });
+        ClientTickEvents.END_CLIENT_TICK.register(c -> {
+            if (active()) {
+                PLAYERS.client(state);
+                PLAYERS.animate();
+                PHYSICS.update(state);
             }
         });
         ServerTickEvents.END_SERVER_TICK.register(server -> PLAYERS.server(server, active() ? state : null));

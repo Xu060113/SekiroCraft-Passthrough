@@ -15,6 +15,7 @@
 namespace sc::input {
 inline std::atomic<bool> capture{false};
 inline std::atomic<bool> mcEdit{false};
+inline std::atomic<bool> flying{false};
 using State = HRESULT(STDMETHODCALLTYPE *)(void *, DWORD, void *);
 using Data = HRESULT(STDMETHODCALLTYPE *)(void *, DWORD, DIDEVICEOBJECTDATA *, DWORD *, DWORD);
 inline std::array<State, 4> originalState{};
@@ -45,7 +46,12 @@ inline bool keyboardOrMouse(void *device) {
     return type == DI8DEVTYPE_KEYBOARD || type == DI8DEVTYPE_MOUSE;
 }
 inline bool actionKey(DWORD key) {
-    return key == DIK_E || key == DIK_Q || key == DIK_F || (key >= DIK_1 && key <= DIK_9);
+    return key == DIK_I || key == DIK_O || key == DIK_J || (key >= DIK_1 && key <= DIK_9);
+}
+inline bool flightKey(DWORD key) {
+    return flying.load(std::memory_order_relaxed) &&
+        (key == DIK_W || key == DIK_A || key == DIK_S || key == DIK_D || key == DIK_SPACE ||
+         key == DIK_LSHIFT || key == DIK_RSHIFT || key == DIK_LCONTROL || key == DIK_RCONTROL);
 }
 template <int I> inline HRESULT STDMETHODCALLTYPE stateHook(void *device, DWORD size, void *out) {
     auto result = originalState[I](device, size, out);
@@ -53,7 +59,7 @@ template <int I> inline HRESULT STDMETHODCALLTYPE stateHook(void *device, DWORD 
     // rather than guessing from its custom data format's buffer length.
     if (SUCCEEDED(result) && out && capture.load(std::memory_order_relaxed) && keyboardOrMouse(device))
         std::memset(out, 0, size);
-    else if (SUCCEEDED(result) && out && mcEdit.load(std::memory_order_relaxed)) {
+    else if (SUCCEEDED(result) && out && (mcEdit.load(std::memory_order_relaxed) || flying.load(std::memory_order_relaxed))) {
         auto type = deviceType(device);
         if (type == DI8DEVTYPE_MOUSE && (size == sizeof(DIMOUSESTATE) || size == sizeof(DIMOUSESTATE2))) {
             auto mouse = static_cast<DIMOUSESTATE *>(out);
@@ -61,7 +67,7 @@ template <int I> inline HRESULT STDMETHODCALLTYPE stateHook(void *device, DWORD 
             mouse->lZ = 0;
         } else if (type == DI8DEVTYPE_KEYBOARD && size == 256) {
             for (DWORD k = 0; k < 256; ++k)
-                if (actionKey(k))
+                if ((mcEdit.load(std::memory_order_relaxed) && actionKey(k)) || flightKey(k))
                     static_cast<uint8_t *>(out)[k] = 0;
         }
     }
@@ -77,13 +83,14 @@ inline HRESULT STDMETHODCALLTYPE dataHook(void *device, DWORD size, DIDEVICEOBJE
         originalData[I](device, size, nullptr, &discarded, 0);
         *count = 0;
     } else if (SUCCEEDED(result) && out && count && size == sizeof(DIDEVICEOBJECTDATA) &&
-               mcEdit.load(std::memory_order_relaxed)) {
+               (mcEdit.load(std::memory_order_relaxed) || flying.load(std::memory_order_relaxed))) {
         DWORD type = deviceType(device), written = 0;
         for (DWORD i = 0; i < *count; ++i) {
             bool drop = type == DI8DEVTYPE_MOUSE &&
                         (out[i].dwOfs >= DIMOFS_BUTTON0 && out[i].dwOfs <= DIMOFS_BUTTON2);
             drop = drop || (type == DI8DEVTYPE_MOUSE && out[i].dwOfs == DIMOFS_Z);
-            drop = drop || (type == DI8DEVTYPE_KEYBOARD && actionKey(out[i].dwOfs));
+            drop = drop || (type == DI8DEVTYPE_KEYBOARD &&
+                           ((mcEdit.load(std::memory_order_relaxed) && actionKey(out[i].dwOfs)) || flightKey(out[i].dwOfs)));
             if (!drop)
                 out[written++] = out[i];
         }

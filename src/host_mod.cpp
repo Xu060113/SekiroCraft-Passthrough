@@ -8,6 +8,7 @@
 #include "../bridge/latest_frame.hpp"
 #include "input_capture.hpp"
 #include "hotkey.hpp"
+#include "movement_hook.hpp"
 #include <atomic>
 #include <thread>
 #include <set>
@@ -57,6 +58,7 @@ BOOL WINAPI hookClip(const RECT *rect) {
 struct App {
     sc::GameHost host;
     bridge::SharedMemory memory;
+    bridge::NativeMovement movement;
     bridge::Compositor compositor;
     bridge::LatestFrame latest;
     std::shared_ptr<bridge::Frame> renderFrame;
@@ -85,7 +87,7 @@ struct App {
     sc::PlayerSnapshot player;
     sc::Camera camera;
     bool initialized{}, nativeCamera = true, showMenu{}, edit{}, reverseDepth = true, hideOriginal = true,
-                        guiOwned{};
+                        guiOwned{}, heroHidden{}, playerFeatures = true;
     std::array<bridge::KeyEdge, 256> keys;
     int cursorAdjustment{};
     RECT previousClip{};
@@ -117,6 +119,7 @@ struct App {
         return keys[vk].update(down, notified);
     }
     void update() {
+        movement.tryInstall();
         bool focused = GetForegroundWindow() == window;
         if (focused) {
             if (pressed(VK_F7))
@@ -135,12 +138,20 @@ struct App {
         bool capturing = focused && (showMenu || (scene && (mcStatus.load() & 2) != 0));
         sc::input::capture = capturing;
         sc::input::mcEdit = focused && scene && edit && !showMenu && (mcStatus.load() & 1) != 0;
+        sc::input::flying = focused && scene && edit && !showMenu && movement.canFly() &&
+                            (mcStatus.load() & 4) != 0;
         cursor(capturing);
+        // Sekiro may hide its OS cursor again from another thread. Render a cursor
+        // in the same final pass as the imported GUI, independent of ShowCursor.
+        ImGui::GetIO().MouseDrawCursor = capturing;
         control.sequence = ++sequence;
         control.tickMs = GetTickCount64();
         control.epoch = epoch;
         control.flags = (scene ? bridge::Scene : 0) | (focused ? bridge::Focus : 0) |
-                        (edit && !showMenu ? bridge::Edit : 0);
+                        (edit ? bridge::Edit : 0) |
+                        (capturing ? bridge::Menu : 0);
+        control.capabilities = 7 | (playerFeatures && movement.installed() ? bridge::constraintCapability : 0) |
+                               (playerFeatures && movement.canFly() ? bridge::flightCapability : 0);
         std::fill(control.keys.begin(), control.keys.end(), 0);
         control.buttons = 0;
         if (focused && !showMenu) {
@@ -185,6 +196,7 @@ struct App {
         control.mouseX = (point.x - (width - sceneWidth) / 2) / sceneWidth;
         control.mouseY = (point.y - (height - sceneHeight) / 2) / sceneHeight;
         memory.writeControl(control);
+        movement.update(control, playerFeatures && scene && focused && (mcStatus.load() & 1) != 0);
         if (!scene || !focused || showMenu) {
             latest.store(nullptr);
             renderFrame.reset();
@@ -195,6 +207,11 @@ struct App {
             sc::log("scene=" + std::to_string(scene) + " mc=" + std::to_string(mcStatus.load()) + " frames=" +
                     std::to_string(compositor.submitted) + " peerBusy=" + std::to_string(statusBusy.load()) +
                     " presentBusy=" + std::to_string(skippedPresents.load()));
+            sc::log("heroHidden=" + std::to_string(heroHidden) + " moveHook=" +
+                    std::to_string(movement.installed()) + " playerCalls=" +
+                    std::to_string(movement.playerCalls.load()) + " constrained=" +
+                    std::to_string(movement.correctedMoves.load()) + " flying=" +
+                    std::to_string(movement.flightMoves.load()));
         }
     }
     void hud() {
@@ -210,12 +227,20 @@ struct App {
         ImGui::Text("IPC busy retries: %llu | skipped presents: %llu", (unsigned long long)statusBusy.load(),
                     (unsigned long long)skippedPresents.load());
         ImGui::Checkbox("Forward MC actions (F8)", &edit);
+        ImGui::Checkbox("Enable experimental player collision / flight", &playerFeatures);
+        ImGui::Text("Player block constraints: %s / creative flight (F6): %s",
+                    movement.installed() ? "hook ready (needs game validation)" : "waiting for verified hook",
+                    movement.canFly() ? "available (needs game validation)" : "unavailable");
+        ImGui::Text("Native hero hidden: %s | player callbacks: %llu | corrections: %llu | flight: %llu",
+                    heroHidden ? "yes" : "no", (unsigned long long)movement.playerCalls.load(),
+                    (unsigned long long)movement.correctedMoves.load(), (unsigned long long)movement.flightMoves.load());
+        ImGui::TextWrapped("MC edit: I inventory / O drop / J swap hands / 1-9 slots / mouse mine-place. E/Q/F remain Sekiro controls.");
         ImGui::Checkbox("Hide native hero when MC frame is valid", &hideOriginal);
         ImGui::Checkbox("Host uses reversed Z", &reverseDepth);
         ImGui::TextWrapped("%s", status.c_str());
         ImGui::TextWrapped("%s", compositor.error.c_str());
         ImGui::TextWrapped(
-            "Native block collision, ground raycast and cross-game damage are unavailable in this build.");
+            "MC boxes constrain only the player; NPC Havok collision, native ground raycast and cross-game damage remain unavailable.");
         ImGui::End();
     }
 };
@@ -260,9 +285,12 @@ LRESULT CALLBACK modWndProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         if ((msg >= WM_LBUTTONDOWN && msg <= WM_MBUTTONDBLCLK) || msg == WM_MOUSEWHEEL || msg == WM_CHAR)
             return 0;
         if ((msg == WM_KEYDOWN || msg == WM_KEYUP) &&
-            (w == 'E' || w == 'Q' || w == 'F' || (w >= '1' && w <= '9')))
+            (w == 'I' || w == 'O' || w == 'J' || (w >= '1' && w <= '9')))
             return 0;
     }
+    if (sc::input::flying && (msg == WM_KEYDOWN || msg == WM_KEYUP) &&
+        (w == 'W' || w == 'A' || w == 'S' || w == 'D' || w == VK_SPACE || w == VK_SHIFT || w == VK_CONTROL))
+        return 0;
     return previous ? CallWindowProcW(previous, hwnd, msg, w, l) : DefWindowProcW(hwnd, msg, w, l);
 }
 bool initRender(IDXGISwapChain *swap) {
@@ -456,7 +484,8 @@ HRESULT STDMETHODCALLTYPE hookPresent(IDXGISwapChain *swap, UINT interval, UINT 
                                  : "Frame received; waiting for matching scene depth or camera.";
         } else
             a.status = "Waiting for a fresh MC frame. In MC: load a dedicated world and /sekirobridge on.";
-        a.host.avatarVisibility(submitted && a.hideOriginal);
+        a.heroHidden = submitted && a.hideOriginal && a.host.avatarVisibility(true);
+        if (!a.heroHidden) a.host.avatarVisibility(false);
         a.hud();
         ImGui::Render();
         {
@@ -471,7 +500,9 @@ HRESULT STDMETHODCALLTYPE hookPresent(IDXGISwapChain *swap, UINT interval, UINT 
     } catch (const std::exception &e) {
         sc::input::capture = false;
         sc::input::mcEdit = false;
+        sc::input::flying = false;
         if (app) {
+            app->movement.update(app->control, false);
             app->host.avatarVisibility(false);
             app->cursor(false);
         }
@@ -479,7 +510,9 @@ HRESULT STDMETHODCALLTYPE hookPresent(IDXGISwapChain *swap, UINT interval, UINT 
     } catch (...) {
         sc::input::capture = false;
         sc::input::mcEdit = false;
+        sc::input::flying = false;
         if (app) {
+            app->movement.update(app->control, false);
             app->host.avatarVisibility(false);
             app->cursor(false);
         }
@@ -543,6 +576,7 @@ DWORD WINAPI scBootstrap(void *) {
             sc::log("Invalid or incompatible shared memory channel.");
             return 0;
         }
+        app->movement.initialize(app->host.base(), app->memory.physics);
         LARGE_INTEGER counter{};
         QueryPerformanceCounter(&counter);
         app->epoch = (uint64_t(counter.QuadPart) ^ (uint64_t(GetCurrentProcessId()) << 32)) | 1;
@@ -550,6 +584,7 @@ DWORD WINAPI scBootstrap(void *) {
             float(GetPrivateProfileIntW(L"SekiroBridge", L"y_offset", 128, config.c_str()));
         app->reverseDepth = GetPrivateProfileIntW(L"SekiroBridge", L"reverse_depth", 1, config.c_str()) != 0;
         app->hideOriginal = GetPrivateProfileIntW(L"SekiroBridge", L"hide_original", 1, config.c_str()) != 0;
+        app->playerFeatures = GetPrivateProfileIntW(L"SekiroBridge", L"player_features", 1, config.c_str()) != 0;
         app->exportWidth =
             std::clamp(GetPrivateProfileIntW(L"SekiroBridge", L"capture_width", 1280, config.c_str()), 320u,
                        bridge::maxWidth);

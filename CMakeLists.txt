@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(SekiroCraftPassthrough VERSION 0.1.0 LANGUAGES C CXX)
+project(SekiroCraftPassthrough VERSION 0.1.0 LANGUAGES C CXX ASM)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -12,7 +12,7 @@ add_library(sekirobridge-jni SHARED bridge/jni.cpp)
 target_include_directories(sekirobridge-jni PRIVATE ${JNI_INCLUDE_DIRS})
 target_compile_definitions(sekirobridge-jni PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 set_target_properties(sekirobridge-jni PROPERTIES PREFIX "" RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/build/passthrough-native")
-add_library(dinput8 SHARED src/proxy.cpp src/host_mod.cpp src/dinput8.def
+add_library(dinput8 SHARED src/proxy.cpp src/host_mod.cpp src/movement_hook.cpp src/movement_stub.S src/dinput8.def
     "${SC_DEPENDENCY_ROOT}/imgui/imgui.cpp" "${SC_DEPENDENCY_ROOT}/imgui/imgui_draw.cpp"
     "${SC_DEPENDENCY_ROOT}/imgui/imgui_widgets.cpp" "${SC_DEPENDENCY_ROOT}/imgui/imgui_tables.cpp"
     "${SC_DEPENDENCY_ROOT}/imgui/backends/imgui_impl_dx11.cpp" "${SC_DEPENDENCY_ROOT}/imgui/backends/imgui_impl_win32.cpp")

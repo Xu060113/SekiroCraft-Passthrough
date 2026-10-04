@@ -15,14 +15,51 @@ final class PlayerSync {
     private float originalYaw, originalPitch;
     private int command;
     private long epoch;
+    private Vec3d lastClientPosition;
+    private Object clientIdentity;
+    private long clientEpoch, sampleTick;
+    private int animationAge = -1;
+    private Vec3d movement = Vec3d.ZERO;
     void client(Protocol.State s) {
         var p = MinecraftClient.getInstance().player;
         if (p == null)
             return;
-        p.setPosition(s.mcX(s.px()), s.mcY(s.py()), s.mcZ(s.pz()));
+        Vec3d position = new Vec3d(s.mcX(s.px()), s.mcY(s.py()), s.mcZ(s.pz()));
+        if (clientIdentity != p || clientEpoch != s.epoch()) {
+            clientIdentity = p;
+            clientEpoch = s.epoch();
+            lastClientPosition = position;
+            sampleTick = s.tickMs();
+            animationAge = -1;
+            movement = Vec3d.ZERO;
+        }
+        if (s.tickMs() > sampleTick) {
+            long dt = s.tickMs() - sampleTick;
+            Vec3d delta = position.subtract(lastClientPosition);
+            movement = dt <= 350 && delta.lengthSquared() < 25 ? delta.multiply(50.0 / dt) : Vec3d.ZERO;
+            sampleTick = s.tickMs();
+            lastClientPosition = position;
+        }
+        p.setPosition(position);
+        p.prevX = p.lastRenderX = position.x;
+        p.prevY = p.lastRenderY = position.y;
+        p.prevZ = p.lastRenderZ = position.z;
         p.setYaw(s.yaw());
         p.setPitch(s.pitch());
+        p.prevYaw = p.lastRenderYaw = s.yaw();
+        p.prevPitch = p.lastRenderPitch = s.pitch();
+        p.setHeadYaw(s.yaw());
+        if (movement.horizontalLengthSquared() > .0001)
+            p.setBodyYaw((float)Math.toDegrees(Math.atan2(-movement.x, movement.z)));
+        p.setSprinting(movement.horizontalLengthSquared() > .07);
         p.setVelocity(Vec3d.ZERO);
+    }
+    void animate() {
+        var p = MinecraftClient.getInstance().player;
+        if (p != null && p == clientIdentity && animationAge != p.age) {
+            animationAge = p.age;
+            p.limbAnimator.updateLimbs((float)Math.min(1, movement.horizontalLength() * 4), .4f);
+        }
     }
     void server(MinecraftServer server, Protocol.State s) {
         if (s == null) {
@@ -64,7 +101,8 @@ final class PlayerSync {
             command = s.command();
             BlockPos target = BlockPos.ofFloored(s.mcX(s.ex() + s.fx() * 4), s.mcY(s.ey() + s.fy() * 4),
                                                  s.mcZ(s.ez() + s.fz() * 4));
-            if (p.getServerWorld().isInBuildLimit(target) && p.getServerWorld().isAir(target))
+            if (p.getServerWorld().isInBuildLimit(target) && p.getServerWorld().isAir(target) &&
+                !p.getBoundingBox().intersects(new net.minecraft.util.math.Box(target)))
                 p.getServerWorld().setBlockState(target, Blocks.GRASS_BLOCK.getDefaultState());
         }
     }

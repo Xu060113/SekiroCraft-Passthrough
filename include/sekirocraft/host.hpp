@@ -115,6 +115,7 @@ class GameHost {
         return s;
     }
     bool supported() const { return supported_; }
+    uintptr_t base() const { return supported_ ? base_ : 0; }
     Vitals vitals() const {
         return readVitals(base_, supported_,
                           [](uintptr_t address, auto &value) { return readMemory(address, value); });
@@ -122,11 +123,14 @@ class GameHost {
     bool avatarVisibility(bool hideOriginal) {
         if (!hideOriginal)
             return avatarHide_.release();
-        // Sekiro practice-tool v1.06: DebugFlags + 6, bit 0 = player_hide.
-        // This is a reversible appearance flag; no physics, combat or save mutation.
+        // ElaDiDu's 1.06 practice table: player ChrIns + 0x1a11, bit 3 = Draw.
+        // DebugFlags.player_hide is AI concealment, not mesh visibility.
         if (!supported_ || !player().valid)
             return false;
-        return avatarHide_.acquire(base_ + 0x3d7a369 + 6, 1);
+        uintptr_t root{}, hero{};
+        if (!readMemory(base_ + 0x3d7a1e0, root) || !readMemory(root + 0x88, hero) || hero < 65536)
+            return false;
+        return avatarHide_.acquire(hero + 0x1a11, 8, false);
     }
     std::optional<Camera> camera(const PlayerSnapshot &player) const {
         if (!supported_ || !player.valid)

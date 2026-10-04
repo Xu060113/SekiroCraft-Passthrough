@@ -20,12 +20,16 @@ int wmain(int argc, wchar_t **argv) {
         c.tickMs = GetTickCount64();
         m.writeControl(c);
         auto f = m.readFrame(0, c.epoch);
-        if (f) {
+        bridge::PhysicsPacket physics;
+        if (f && m.physics.read(physics)) {
             bool ok = f->pixels.size() == 4 * 4 * 12 &&
                       std::all_of(f->pixels.begin(), f->pixels.end(), [](uint8_t b) { return b == 0x6b; });
             if (!ok)
                 return 4;
-            std::cout << "Cross-process C++ -> Java JNI -> C++ color/depth/overlay passed\n";
+            if (physics.sequence != 99 || physics.epoch != c.epoch || physics.flags != 7 ||
+                physics.count != 1 || physics.radius != .3f || physics.height != 1.8f ||
+                physics.shapes[0].max.y != .5f) return 6;
+            std::cout << "Cross-process C++ -> Java JNI -> C++ color/depth/overlay and physics ABI passed\n";
             return 0;
         }
         Sleep(5);

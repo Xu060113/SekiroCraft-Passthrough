@@ -36,8 +36,14 @@ public final class JniPeer {
         if (!published)
             throw new AssertionError("publish");
         NativeBridge.status(handle, 3, state.epoch());
+        var physics = Protocol.direct(6208);
+        physics.putLong(NativeBridge.clockMs()).putLong(state.tickMs()).putLong(state.epoch());
+        physics.putInt(7).putInt(1);
+        physics.putFloat(0).putFloat(0).putFloat(0).putFloat(.3f).putFloat(1.8f).putInt(0).putLong(99);
+        physics.putFloat(-1).putFloat(0).putFloat(-1).putFloat(1).putFloat(.5f).putFloat(1);
+        if (!NativeBridge.physics(handle, physics)) throw new AssertionError("physics publish");
         Thread.sleep(200);
         NativeBridge.close(handle);
-        System.out.println("Java peer published three real frame planes");
+        System.out.println("Java peer published real frame planes and collision/flight state");
     }
 }

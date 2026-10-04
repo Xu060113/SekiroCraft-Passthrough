@@ -48,6 +48,15 @@ public final class ProtocolSelfTest {
         require(!NativeBridge.control(handle, Protocol.direct(10)), "small Java buffer rejected");
         require(!NativeBridge.publish(handle, meta, ByteBuffer.allocate(4 * 4 * 12)),
                 "non-direct frame rejected");
+        require(!NativeBridge.physics(handle, ByteBuffer.allocate(6208)), "non-direct physics rejected");
+        require(!NativeBridge.physics(handle, Protocol.direct(64)), "truncated physics rejected");
+        ByteBuffer physics = Protocol.direct(6208);
+        physics.putLong(NativeBridge.clockMs()).putLong(NativeBridge.clockMs()).putLong(123);
+        physics.putInt(1).putInt(257);
+        physics.putFloat(0).putFloat(0).putFloat(0).putFloat(.3f).putFloat(1.8f).putInt(0).putLong(1);
+        require(!NativeBridge.physics(handle, physics), "shape count overflow rejected");
+        physics.putInt(28, 0);
+        require(NativeBridge.physics(handle, physics), "valid empty shape snapshot accepted");
         NativeBridge.close(handle);
         System.out.println(checks + " Java/JNI protocol checks passed");
     }

@@ -7,6 +7,7 @@
 #endif
 #include <windows.h>
 #include "protocol.hpp"
+#include "physics.hpp"
 #include <string>
 #include <memory>
 
@@ -48,6 +49,7 @@ class SharedMemory {
     uint8_t *bytes_{};
 
   public:
+    PhysicsChannel physics;
     ~SharedMemory() { close(); }
     SharedMemory() = default;
     SharedMemory(const SharedMemory &) = delete;
@@ -65,6 +67,7 @@ class SharedMemory {
         close();
         if (!validChannel(channel))
             return false;
+        if (!physics.open(channel)) return false;
         auto name = L"Local\\SekiroBridge-" + channel;
         mutex_ = CreateMutexW(nullptr, FALSE, (name + L"-lock").c_str());
         mapping_ = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, DWORD(mappingBytes),
@@ -91,6 +94,7 @@ class SharedMemory {
         return h.magic == magic && h.version == version && h.mappingBytes == mappingBytes;
     }
     void close() {
+        physics.close();
         if (bytes_)
             UnmapViewOfFile(bytes_);
         if (mapping_)
