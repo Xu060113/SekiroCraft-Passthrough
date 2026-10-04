@@ -16,10 +16,16 @@ public final class InputForwarder {
     private int buttons;
     private long epoch,eventSequence,dx,dy,textSequence,pointerEventTick;
     private boolean initialized,inputEnabled;
+    private Object pointerScreen;
+    private long pointerGeometry;
+    private float pointerX,pointerY;
+    private boolean pointerValid;
     // The target keeps replay ordering independent from the GLFW window and lets
     // the same production replay code be exercised without launching either game.
     interface Target {
         boolean screenOpen();
+        default Object screenIdentity(){return screenOpen()?this:null;}
+        default long cursorGeometry(){return 0;}
         void cursor(float x,float y);
         void key(int key,int action,int mods);
         void button(int button,int action,int mods);
@@ -31,6 +37,8 @@ public final class InputForwarder {
     private static final class MinecraftTarget implements Target {
         private MinecraftClient client(){return MinecraftClient.getInstance();}
         public boolean screenOpen(){return client().currentScreen!=null;}
+        public Object screenIdentity(){return client().currentScreen;}
+        public long cursorGeometry(){var w=client().getWindow();return ((long)w.getWidth()<<32)|Integer.toUnsignedLong(w.getHeight());}
         public void cursor(float x,float y){var c=client();
             ((InputInvoker)c.mouse).bridgeCursor(c.getWindow().getHandle(),
                 Math.max(0,Math.min(1,x))*c.getWindow().getWidth(),Math.max(0,Math.min(1,y))*c.getWindow().getHeight());}
@@ -85,6 +93,16 @@ public final class InputForwarder {
         buttons=action!=0?buttons|bit:buttons&~bit;
         target.button(code,action,mods);
     }
+    private void cursor(float x,float y){
+        x=Math.max(0,Math.min(1,x));y=Math.max(0,Math.min(1,y));
+        Object screen=target.screenIdentity();long geometry=target.cursorGeometry();
+        // Mouse.onCursorPos invokes Screen.mouseDragged whenever activeButton is
+        // held, even for zero movement. Replaying stationary snapshots or the same
+        // release coordinate must not manufacture inventory quick-craft drags.
+        if(pointerValid && screen==pointerScreen && geometry==pointerGeometry && x==pointerX && y==pointerY)return;
+        pointerScreen=screen;pointerGeometry=geometry;pointerX=x;pointerY=y;pointerValid=true;
+        target.cursor(x,y);
+    }
     void update(Protocol.State s){
         if(NativeBridge.input(BridgeClient.handle(),events))update(s,events,NativeBridge.clockMs());
     }
@@ -112,9 +130,9 @@ public final class InputForwarder {
                 if(!input)continue;
                 if(kind==1)key(code,action,mods);
                 else if(kind==2){pointerEventTick=tick;
-                    if(target.screenOpen())target.cursor(events.getFloat(at+16),events.getFloat(at+20));button(code,action,mods);}
+                    if(target.screenOpen())cursor(events.getFloat(at+16),events.getFloat(at+20));button(code,action,mods);}
                 else if(kind==3){pointerEventTick=tick;
-                    if(target.screenOpen())target.cursor(events.getFloat(at+16),events.getFloat(at+20));
+                    if(target.screenOpen())cursor(events.getFloat(at+16),events.getFloat(at+20));
                     target.scroll(events.getInt(at+24)/120.0);}
             }
             eventSequence=next;replayMods=-1;
@@ -130,7 +148,8 @@ public final class InputForwarder {
                 for(int vk=8;vk<256;++vk){int key=glfwKey(vk);
                     if(key!=GLFW.GLFW_KEY_UNKNOWN && forwardedKey(vk))target.level(key,pressed[vk]!=0);}
             if(input && target.screenOpen() && s.tickMs()>=tick && s.tickMs()>pointerEventTick)
-                target.cursor(s.mouseX(),s.mouseY());
+                cursor(s.mouseX(),s.mouseY());
+            if(!target.screenOpen())pointerValid=false;
             long mx=nx-dx,my=ny-dy;dx=nx;dy=ny;
             if(input && !target.screenOpen() && Math.abs(mx)<5000 && Math.abs(my)<5000)target.motion(mx,my);
             if(s.textSequence()>=textSequence)
@@ -142,5 +161,5 @@ public final class InputForwarder {
     }
     private void releaseHeld(){for(int vk=8;vk<256;++vk)key(vk,0,0);for(int i=0;i<3;++i)button(i,0,0);}
     void release(){if(!initialized)return;
-        try{replaying=true;releaseHeld();}finally{replaying=false;replayMods=-1;}initialized=false;inputEnabled=false;}
+        try{replaying=true;releaseHeld();}finally{replaying=false;replayMods=-1;}initialized=false;inputEnabled=false;pointerValid=false;pointerScreen=null;}
 }

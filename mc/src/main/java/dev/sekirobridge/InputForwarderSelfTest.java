@@ -14,13 +14,19 @@ public final class InputForwarderSelfTest {
     }
     private static final class Target implements InputForwarder.Target {
         boolean screen=true;
+        Object identity=new Object();long geometry;int active=-1,drags;
         final List<String> calls=new ArrayList<>();
         final Map<Integer,Boolean> levels=new HashMap<>();
         float x,y;
         public boolean screenOpen(){return screen;}
-        public void cursor(float x,float y){this.x=x;this.y=y;calls.add("cursor:"+x+":"+y);}
+        public Object screenIdentity(){return screen?identity:null;}
+        public long cursorGeometry(){return geometry;}
+        // Vanilla Mouse.onCursorPos enters mouseDragged whenever activeButton is
+        // set, including a callback with identical coordinates.
+        public void cursor(float x,float y){if(active>=0)++drags;this.x=x;this.y=y;calls.add("cursor:"+x+":"+y);}
         public void key(int key,int action,int mods){calls.add("key:"+key+":"+action+":"+mods);}
         public void button(int button,int action,int mods){
+            active=action==1?button:-1;
             calls.add("button:"+button+":"+action+":"+mods+":"+x+":"+y);
             check(InputForwarder.replaying,"all button callbacks have bridge ownership");
             if(action==1)check(InputForwarder.replayMods==mods,"press uses event-time modifiers");
@@ -112,6 +118,28 @@ public final class InputForwarderSelfTest {
         var repeat=packet(190,14);event(repeat,13,1,'W',2,0,0,0);
         input.update(control(189,Protocol.EDIT,0),repeat,190);
         check(input.held('W') && target.calls.contains("key:87:2:0"),"a native repeat recovers a DOWN lost during initial focus handoff");
+        input.release();
+        target.screen=true;input.update(control(200,Protocol.EDIT,0),packet(200,14),200);target.calls.clear();target.drags=0;
+        var stationary=packet(210,16);
+        event(stationary,14,2,0,1,0,.5f,.5f);event(stationary,15,2,0,0,0,.5f,.5f);
+        input.update(control(209,Protocol.EDIT,0),stationary,210);
+        check(target.presses(0)==1 && target.releases(0)==1 && target.drags==0,
+            "a stationary click releases without a synthetic quick-craft drag");
+        var hold=packet(220,17);event(hold,16,2,0,1,0,.9f,.8f);
+        input.update(control(220,Protocol.EDIT,1),hold,220);target.calls.clear();target.drags=0;
+        for(long stamp=221;stamp<226;++stamp)input.update(control(stamp,Protocol.EDIT,1),packet(stamp,17),stamp);
+        check(target.drags==0 && target.calls.isEmpty(),"held stationary pointer snapshots do not alter inventory drag slots");
+        var moved=control(226,Protocol.EDIT,1);moved=new Protocol.State(moved.sequence(),moved.tickMs(),moved.epoch(),moved.flags(),moved.capabilities(),
+            moved.px(),moved.py(),moved.pz(),moved.ex(),moved.ey(),moved.ez(),moved.fx(),moved.fy(),moved.fz(),moved.fov(),moved.aspect(),
+            moved.near(),moved.far(),moved.yOffset(),moved.scale(),moved.width(),moved.height(),moved.keys(),.8f,.7f,moved.wheel(),
+            moved.buttons(),moved.command(),moved.textSequence(),moved.text(),moved.captureYaw());
+        input.update(moved,packet(226,17),226);
+        check(target.drags==1,"real pointer movement continues vanilla inventory dragging");
+        input.release();target.calls.clear();input.update(control(230,Protocol.EDIT,0),packet(230,17),230);
+        target.calls.clear();target.identity=new Object();input.update(control(231,Protocol.EDIT,0),packet(231,17),231);
+        check(target.calls.size()==1,"new screen receives pointer even at unchanged coordinates");
+        target.calls.clear();target.geometry=1;input.update(control(232,Protocol.EDIT,0),packet(232,17),232);
+        check(target.calls.size()==1,"resized window refreshes pointer scaling");
         input.release();
         System.out.println("PASS "+checks+" production input replay checks");
     }
