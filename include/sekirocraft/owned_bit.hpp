@@ -11,7 +11,7 @@ class OwnedBit {
     OwnedBit(const OwnedBit &) = delete;
     OwnedBit &operator=(const OwnedBit &) = delete;
     ~OwnedBit() { release(); }
-    bool acquire(uintptr_t address, uint8_t mask, bool set = true) {
+    bool acquire(uintptr_t address, uint8_t mask, bool set = true, bool reassert = false) {
         if (!mask || (mask & (mask - 1)) || address < 65536)
             return false;
         if (address_ && (address_ != address || mask_ != mask || set_ != set))
@@ -19,20 +19,21 @@ class OwnedBit {
         if (address_) {
             uint8_t current{};
             SIZE_T got{};
-            return address_ == address && mask_ == mask &&
-                   ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<void *>(address_), &current, 1,
-                                     &got) &&
-                   got == 1 && ((current & mask_) != 0) == set_;
+            if(!ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(address_),&current,1,&got) || got!=1)return false;
+            if(((current&mask_)!=0)==set_)return true;
+            if(!reassert)return false;
+            uint8_t next=set_?current|mask_:current&~mask_;
+            return WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(address_),&next,1,&got) && got==1;
         }
         uint8_t value{};
         SIZE_T n{};
         if (!ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<void *>(address), &value, 1, &n) ||
             n != 1)
             return false;
-        if (((value & mask) != 0) == set) return true;
+        original_=(value&mask)!=0;
         auto next = uint8_t(set ? value | mask : value & ~mask);
-        if (!WriteProcessMemory(GetCurrentProcess(), reinterpret_cast<void *>(address), &next, 1, &n) ||
-            n != 1)
+        if (value!=next && (!WriteProcessMemory(GetCurrentProcess(), reinterpret_cast<void *>(address), &next, 1, &n) ||
+            n != 1))
             return false;
         address_ = address;
         mask_ = mask;
@@ -48,7 +49,7 @@ class OwnedBit {
             n != 1)
             return false;
         if (((value & mask_) != 0) == set_) {
-            auto next = uint8_t(set_ ? value & ~mask_ : value | mask_);
+            auto next = uint8_t(original_ ? value | mask_ : value & ~mask_);
             if (!WriteProcessMemory(GetCurrentProcess(), reinterpret_cast<void *>(address_), &next, 1, &n) ||
                 n != 1)
                 return false;
@@ -58,10 +59,13 @@ class OwnedBit {
         return true;
     }
     bool active() const { return address_ != 0; }
+    // The owning entity was replaced. Its former address may already be reused.
+    void abandon(){address_=0;mask_=0;}
 
   private:
     uintptr_t address_{};
     uint8_t mask_{};
     bool set_{};
+    bool original_{};
 };
 } // namespace sc

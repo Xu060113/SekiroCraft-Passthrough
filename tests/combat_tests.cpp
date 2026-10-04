@@ -2,10 +2,22 @@
 #include "../src/native_combat.hpp"
 #include <iostream>
 #include <stdexcept>
+static uintptr_t fixtureActor{},fixtureData{};
+static int fixturePostureCalls{};
+static uintptr_t fixtureLookup(uintptr_t,uint32_t handle){return handle==456?fixtureActor:0;}
+static void fixtureHp(uintptr_t data,int hp){
+    if(*reinterpret_cast<uint8_t*>(data+0x228)&4)hp=std::max(1,hp);
+    *reinterpret_cast<int*>(data+0x130)=hp;
+}
+static void fixturePosture(uintptr_t data,int left,uint8_t recovery){
+    if(data!=fixtureData || recovery)throw std::runtime_error("posture setter ABI");
+    ++fixturePostureCalls;*reinterpret_cast<int*>(data+0x148)=left;
+}
 int main(){int n{};auto check=[&](bool b,const char*s){++n;if(!b)throw std::runtime_error(s);};
     using namespace bridge;
     CombatState state;state.sequence=1;state.epoch=7;state.hero=2;state.flags=1;state.hp=250;state.maxHp=500;
     check(validCombat(state),"valid native life");state.hp=501;check(!validCombat(state),"invalid HP");state.hp=250;
+    state.posture=101;state.maxPosture=100;check(!validCombat(state),"posture above maximum rejected");state.posture=80;
     state.count=65;check(!validCombat(state),"actor overflow");state.count=1;auto &a=state.actors[0];a.id=9;a.hp=100;a.maxHp=200;
     check(validCombat(state),"actor");a.position.x=NAN;check(!validCombat(state),"invalid actor");a.position.x=0;
     CombatReport p;p.tick=100;p.epoch=7;p.hero=2;p.session=3;
@@ -39,5 +51,36 @@ int main(){int n{};auto check=[&](bool b,const char*s){++n;if(!b)throw std::runt
     data[0x228]=0;memory.combatReport.write(p);adapter.tick(7,true);put(root,0x88,uintptr_t(0));adapter.releaseIfInactive(false);
     check(data[0x228]==8,"does not restore a potentially freed former hero");
     image[0xbd64e0]=0;NativeCombatAdapter disabled;disabled.initialize(base,memory);check(!disabled.ready(),"unknown code disables writes");
+    std::memcpy(image.data()+0xbd64e0,setter,16);
+    const uint8_t postureCode[]{0x48,0x89,0x6c,0x24,0x18,0x48,0x89,0x74,0x24,0x20,0x57,0x48,0x83,0xec,0x20,0x41};
+    const uint8_t postureStore[]{0x89,0x87,0x48,0x01,0x00,0x00,0x85,0xdb};
+    std::memcpy(image.data()+0xbd6710,postureCode,16);std::memcpy(image.data()+0xbd679a,postureStore,8);
+    std::vector<uint8_t> npc(0x2100),npcModules(0x80),npcData(0x280),npcPhysics(0x100),list(0x20);
+    put(root,0x88,ptr(chr));put(root,0x10,ptr(list));put(list,0x18,int(1));
+    put(npc,0,base+0x1000);put(npc,8,uint32_t(456));put(npc,0x1ff8,ptr(npcModules));put(npc,0x74,uint8_t(6));
+    put(npcModules,0x18,ptr(npcData));put(npcModules,0x68,ptr(npcPhysics));put(npcPhysics,8,ptr(npc));
+    put(npcPhysics,0x80,sc::Vec3{2,2,3});put(npcData,0x130,int(1000));put(npcData,0x134,int(1000));
+    put(npcData,0x148,int(200));put(npcData,0x14c,int(200));put(npcData,0x25c,int(2));npcData[0x228]=4;
+    NativeCombatAdapter combat;combat.initialize(base,memory);check(combat.postureReady(),"validated production posture entry and store");
+    DWORD hpOld{},lookupOld{};
+    check(VirtualProtect(image.data()+0xbd6000,4096,PAGE_EXECUTE_READWRITE,&hpOld) &&
+          VirtualProtect(image.data()+0xa4a000,4096,PAGE_EXECUTE_READWRITE,&lookupOld),"executable native setter fixture");
+    auto stub=[&](size_t at,uintptr_t function){uint8_t jump[]{0x48,0xb8,0,0,0,0,0,0,0,0,0xff,0xe0};
+        std::memcpy(jump+2,&function,8);std::memcpy(image.data()+at,jump,12);};
+    fixtureActor=ptr(npc);fixtureData=ptr(npcData);
+    stub(0xa4a050,reinterpret_cast<uintptr_t>(fixtureLookup));stub(0xbd64e0,reinterpret_cast<uintptr_t>(fixtureHp));
+    stub(0xbd6710,reinterpret_cast<uintptr_t>(fixturePosture));
+    combat.tick(8,true);combat.observe(ptr(npcPhysics));Sleep(51);combat.tick(8,true);
+    check(memory.combatState.read(state) && state.count==1 && state.actors[0].posture==200 &&
+          state.actors[0].bossNode==2 && (state.actors[0].flags&4),"boss counters and native NoDeath exported");
+    p={};p.tick=GetTickCount64();p.epoch=8;p.hero=state.hero;p.session=9;p.command=1;
+    p.commands[0]={1,state.actors[0].id,40,0};memory.combatReport.write(p);combat.tick(8,true);
+    check(*reinterpret_cast<int*>(npcData.data()+0x130)==1 && *reinterpret_cast<int*>(npcData.data()+0x148)==0 &&
+          fixturePostureCalls==1,"production dispatch uses HP and posture setters, preserves boss NoDeath");
+    combat.tick(8,true);check(fixturePostureCalls==1,"acknowledged command never replays posture damage");
+    check(*reinterpret_cast<int*>(npcData.data()+0x25c)==2,"combat never edits boss phase/node counter");
+    npcData[0x228]|=16;p.tick=GetTickCount64();p.command=2;p.commands[1]={2,state.actors[0].id,1,0};
+    memory.combatReport.write(p);combat.tick(8,true);check(fixturePostureCalls==1,"NoPostureConsume is respected");
+    VirtualProtect(image.data()+0xbd6000,4096,hpOld,&hpOld);VirtualProtect(image.data()+0xa4a000,4096,lookupOld,&lookupOld);
     std::cout<<n<<" combat layout, validation and owned player immunity checks passed\n";
 }

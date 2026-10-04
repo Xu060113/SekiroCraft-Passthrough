@@ -17,6 +17,7 @@ class NativeDriver {
     PlayerPacket player_{};
     CameraFrames cameraFrames_;
     std::atomic<bool> cameraEnabled_{};
+    std::atomic<bool> hideNative_{};
     std::atomic<uint64_t> cameraEpoch_{}, controlTick_{};
     bool enabled_{}, installed_{}, rayReady_{};
     uint64_t retry_{}, terrainTick_{}, terrainSequence_{};
@@ -87,9 +88,9 @@ class NativeDriver {
     }
     void receiveFrame(std::shared_ptr<Frame> frame){cameraFrames_.receive(std::move(frame));}
     void takeCameraFrame(std::shared_ptr<Frame> &frame){cameraFrames_.takeDisplayed(frame);}
-    void update(const Control &c,bool enabled){std::unique_lock lock(mutex_,std::try_to_lock);
+    void update(const Control &c,bool enabled,bool hideNative=false){std::unique_lock lock(mutex_,std::try_to_lock);
         if(lock){control_=c;enabled_=enabled && ready();
-            cameraEpoch_=c.epoch;controlTick_=c.tickMs;cameraEnabled_=enabled_;}}
+            cameraEpoch_=c.epoch;controlTick_=c.tickMs;cameraEnabled_=enabled_;hideNative_=enabled_ && hideNative;}}
     bool target(sc::Vec3 &position) {
         std::unique_lock lock(mutex_,std::try_to_lock);if(!lock)return false;
         auto now=GetTickCount64();
@@ -109,6 +110,16 @@ class NativeDriver {
         uintptr_t field{},currentCamera{};
         if(!sc::readMemory(base_+0x3d5c0a0,field) || !sc::readMemory(field+0x30,currentCamera) || camera!=currentCamera)return;
         auto now=GetTickCount64();
+        // Reassert before scene rendering, after native combat/character updates
+        // may have enabled Draw. Present alone is too late for that frame.
+        if(cameraEnabled_ && hideNative_ && fresh(now,controlTick_)){
+            uintptr_t root{},hero{};uint8_t bits{};
+            if(sc::readMemory(base_+0x3d7a1e0,root) && sc::readMemory(root+0x88,hero) &&
+               sc::readMemory(hero+0x1a11,bits) && (bits&8)){
+                bits&=~8u;SIZE_T wrote{};
+                WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(hero+0x1a11),&bits,1,&wrote);
+            }
+        }
         auto frame=cameraFrames_.select(cameraEpoch_.load(),now);
         if(!cameraEnabled_ || !fresh(now,controlTick_) || !frame){cameraFrames_.applied({});return;}
         const auto &m=frame->meta;

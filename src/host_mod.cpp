@@ -113,7 +113,14 @@ struct App {
     sc::Camera snapshotCamera;
     uint64_t snapshotAt=UINT64_MAX;
     bool immediateDirty{};
-    std::array<std::shared_ptr<bridge::Frame>,4> cameraHistory;
+    std::array<std::shared_ptr<bridge::Frame>,16> cameraHistory;
+    // Deferred contexts only lock short CPU metadata work. Present's uploads,
+    // GPU copies, input polling and log I/O cannot discard their command lists.
+    bridge::RecordingGate recorder;
+    std::atomic<unsigned> recordingWidth{},recordingHeight{};
+    std::atomic<uint64_t> recordingFrame{};
+    std::atomic<bool> recordingReverseDepth{true};
+    std::atomic<float> recordingAspect{16.f/9};
     sc::Camera sceneCamera;
     std::atomic<uint64_t> epoch{};
     std::atomic<uint32_t> mcStatus{};
@@ -134,16 +141,17 @@ struct App {
     };
     std::unordered_map<ID3D11DeviceContext *, Binding> bindings;
     std::unordered_map<ID3D11DeviceContext *, bridge::SceneRecording> recordings;
-    // A missed Finish boundary invalidates pending recordings instead of
-    // attaching their draws to a later command list.
+    // Only a resource resize invalidates recordings across all contexts.
     std::atomic<uint64_t> recordingGeneration{1};
     std::atomic<uint64_t> unknownLists{}, finishBusy{}, clearBusy{}, executeBusy{};
     uint64_t snapshotFailures{};
-    uint64_t resourceEpoch=1, finishedLists{}, executedLists{};
+    uint64_t resourceEpoch=1, executedLists{};
+    std::atomic<uint64_t> finishedLists{};
     std::unordered_map<ID3D11DepthStencilView *, uint64_t> depthScores;
     std::set<std::pair<UINT, UINT>> observedDepthSizes;
     std::set<UINT> observedContextTypes;
-    uint64_t bestDepthScore{}, indexedCalls{}, instancedCalls{}, targetCalls{};
+    uint64_t bestDepthScore{};
+    std::atomic<uint64_t> indexedCalls{}, instancedCalls{}, targetCalls{};
     HWND window{};
     IDXGISwapChain *swap{};
     std::atomic<WNDPROC> previousWndProc{};
@@ -185,6 +193,8 @@ struct App {
         return keys[vk].update(down, notified);
     }
     void update() {
+        recordingWidth=width;recordingHeight=height;recordingFrame=frames;
+        recordingReverseDepth=reverseDepth;
         movement.tryInstall();
         driver.tryInstall();
         bool focused = GetForegroundWindow() == window;
@@ -274,14 +284,16 @@ struct App {
                 inputQueue.dx=sc::input::mouseDx.load();inputQueue.dy=sc::input::mouseDy.load();
                 memory.input.write(inputQueue);}
         }
+        recordingAspect=control.aspect;
         memory.writeControl(control);
         movement.update(control, playerFeatures && scene && (mcStatus.load() & 1) != 0);
-        driver.update(control,mcOwner);
+        heroHidden=mcOwner && hideOriginal && host.avatarVisibility(true);
+        if(!heroHidden)host.avatarVisibility(false);
+        driver.update(control,mcOwner,heroHidden);
         combat.releaseIfInactive(mcOwner);
         if (!scene || !focused || showMenu) {
             latest.store(nullptr);
             renderFrame.reset();
-            host.avatarVisibility(false);
         }
         if (GetTickCount64() - lastPeerLog > 5000) {
             lastPeerLog = GetTickCount64();
@@ -298,9 +310,10 @@ struct App {
                     " controlledMoves="+std::to_string(driver.controlledMoves.load())+
                     " cameraFrame="+std::to_string(driver.cameraFrameSequence.load())+
                     " sceneFrame="+std::to_string(sceneFrame?sceneFrame->meta.sequence:0)+
-                    " finishedLists="+std::to_string(finishedLists)+
+                    " finishedLists="+std::to_string(finishedLists.load())+
                     " executedLists="+std::to_string(executedLists)+
                     " groundHits="+std::to_string(driver.terrainHits.load())+
+                    " npcBlockCorrections="+std::to_string(movement.npcCorrections.load())+
                     " terrainSamples="+std::to_string(driver.terrainSamples.load())+
                     " mouseState="+std::to_string(sc::input::mouseStates.load())+
                     " mouseData="+std::to_string(sc::input::mouseData.load()));
@@ -312,7 +325,8 @@ struct App {
                     " executeBusy="+std::to_string(executeBusy.load())+
                     " world="+(worldReason.empty()?"ok":worldReason)+
                     " hud="+(overlayReason.empty()?"ok":overlayReason));
-            sc::log("combatReady="+std::to_string(combat.ready())+" actors="+std::to_string(combat.publishedActors.load())+
+            sc::log("combatReady="+std::to_string(combat.ready())+" postureReady="+std::to_string(combat.postureReady())+
+                    " postureHits="+std::to_string(combat.appliedPosture.load())+" actors="+std::to_string(combat.publishedActors.load())+
                     " hits="+std::to_string(combat.applied.load())+" rejected="+std::to_string(combat.rejected.load()));
         }
     }
@@ -339,7 +353,7 @@ struct App {
         ImGui::TextWrapped("MC controls: WASD / Space jump (double-tap creative flight) / Shift sneak / Ctrl sprint / E inventory / Q drop / F swap / F5 perspective.");
         ImGui::Text("MC camera=%llu | MC positions=%llu",(unsigned long long)driver.cameraCalls.load(),
                     (unsigned long long)driver.controlledMoves.load());
-        ImGui::Text("Deferred recorded=%llu | submitted=%llu",(unsigned long long)finishedLists,
+        ImGui::Text("Deferred recorded=%llu | submitted=%llu",(unsigned long long)finishedLists.load(),
                     (unsigned long long)executedLists);
         ImGui::Text("World=%llu | HUD=%llu | depth copies=%llu",(unsigned long long)compositor.submitted,
                     (unsigned long long)compositor.overlaySubmitted,(unsigned long long)sceneSnapshot.captures);
@@ -353,7 +367,7 @@ struct App {
         ImGui::TextWrapped("%s", status.c_str());
         ImGui::TextWrapped("%s", compositor.error.c_str());
         ImGui::TextWrapped(
-            "Native terrain is a local height field. HP combat is experimental; native boss deathblows and NPC collision with MC blocks remain separate.");
+            "Local NPC block constraints and HP/posture combat are experimental. Native deathblows, complete hit reactions and Havok bodies remain unavailable.");
         ImGui::End();
     }
 };
@@ -442,7 +456,7 @@ bool initRender(IDXGISwapChain *swap) {
 // Immediate/deferred context hook implementation follows below.
 void recordTargets(ID3D11DeviceContext *context, ID3D11DepthStencilView *dsv) {
     auto &a = *app;
-    if (!a.initialized)
+    if (!nativeDevice.load())
         return;
     ++a.targetCalls;
     auto &binding = a.bindings[context];
@@ -452,7 +466,7 @@ void recordTargets(ID3D11DeviceContext *context, ID3D11DepthStencilView *dsv) {
         return;
     ComPtr<ID3D11Device> device;
     context->GetDevice(&device);
-    if (device.Get() != a.device.Get())
+    if (device.Get() != nativeDevice.load())
         return;
     if (a.observedContextTypes.insert(context->GetType()).second)
         sc::log("Observed D3D11 context type=" + std::to_string(context->GetType()));
@@ -467,11 +481,9 @@ void recordTargets(ID3D11DeviceContext *context, ID3D11DepthStencilView *dsv) {
         sc::log("Bound depth " + std::to_string(desc.Width) + "x" + std::to_string(desc.Height) +
                 " samples=" + std::to_string(desc.SampleDesc.Count));
     float aspect = float(desc.Width) / std::max(1u, desc.Height);
-    float expectedAspect = a.nativeCamera && a.camera.valid
-                               ? a.camera.projection.at(1, 1) / a.camera.projection.at(0, 0)
-                               : aspect;
-    if (desc.Width == a.width && desc.Height <= a.height && desc.Height >= a.height / 2 &&
-        desc.SampleDesc.Count == 1 && std::abs(aspect - expectedAspect) < .03f)
+    auto width=a.recordingWidth.load(),height=a.recordingHeight.load();
+    if (desc.Width == width && desc.Height <= height && desc.Height >= height / 2 &&
+        desc.SampleDesc.Count == 1 && std::abs(aspect-a.recordingAspect.load()) < .03f)
         binding.depth = dsv;
 }
 bool captureSceneDepth(ID3D11DeviceContext *context) {
@@ -493,7 +505,7 @@ bool captureSceneDepth(ID3D11DeviceContext *context) {
 }
 void flushImmediateDepth(ID3D11DeviceContext *context) {
     auto &a = *app;
-    if (a.immediateDirty && context->GetType() == D3D11_DEVICE_CONTEXT_IMMEDIATE) {
+    if (context->GetType() == D3D11_DEVICE_CONTEXT_IMMEDIATE && a.immediateDirty) {
         a.immediateDirty = false;
         captureSceneDepth(context);
     }
@@ -520,6 +532,10 @@ void submitSceneDraw(const bridge::SceneDraw &draw) {
         a.sceneFrame = draw.frame;
     }
 }
+template<class F> void withRecording(ID3D11DeviceContext *context,F work) {
+    if(!gameContext(context))return;
+    app->recorder.run(context->GetType()==D3D11_DEVICE_CONTEXT_DEFERRED,appMutex,work);
+}
 template <int I>
 void STDMETHODCALLTYPE hookClearDepth(ID3D11DeviceContext *context, ID3D11DepthStencilView *depth,
                                       UINT flags, FLOAT value, UINT8 stencil) {
@@ -541,15 +557,8 @@ void STDMETHODCALLTYPE hookClearDepth(ID3D11DeviceContext *context, ID3D11DepthS
     originalClearDepth[I](context, depth, flags, value, stencil);
     if (!tracked)
         return;
-    std::unique_lock guard(appMutex, std::try_to_lock);
-    if (!guard.owns_lock()) {
-        app->recordingGeneration.fetch_add(1);
-        app->clearBusy.fetch_add(1);
-        return;
-    }
+    withRecording(context,[&]{
     auto &a = *app;
-    if (!a.initialized)
-        return;
     auto bound = a.bindings.find(context);
     if (bound != a.bindings.end() && bound->second.depth.Get() == depth) {
         bound->second.deferredCaptured = false;
@@ -562,10 +571,11 @@ void STDMETHODCALLTYPE hookClearDepth(ID3D11DeviceContext *context, ID3D11DepthS
         a.recordings[context].record(a.recordingGeneration.load(), std::move(clear));
     else
         submitSceneDraw(clear);
+    });
 }
 void recordDraw(ID3D11DeviceContext *context, UINT count) {
     auto &a = *app;
-    if (!a.initialized || !a.player.valid || count < 100)
+    if (!nativeDevice.load() || count < 100)
         return;
     auto found = a.bindings.find(context);
     if (found == a.bindings.end() || !found->second.depth)
@@ -579,8 +589,8 @@ void recordDraw(ID3D11DeviceContext *context, UINT count) {
         bound.recordingGeneration = generation;
         bound.deferredCaptured = false;
     }
-    if(deferred ? !bound.deferredCaptured : bound.capturedAt!=a.frames){
-        bound.capturedAt=a.frames;
+    if(deferred ? !bound.deferredCaptured : bound.capturedAt!=a.recordingFrame.load()){
+        bound.capturedAt=a.recordingFrame.load();
         bound.deferredCaptured=true;
         a.driver.takeCameraFrame(a.cameraFrame);
         if(a.cameraFrame && a.cameraHistory[0]!=a.cameraFrame){
@@ -588,8 +598,8 @@ void recordDraw(ID3D11DeviceContext *context, UINT count) {
             a.cameraHistory[0]=a.cameraFrame;
         }
         bound.frame.reset();
-        bound.camera=a.host.camera(a.player).value_or(sc::Camera{});
-        if(a.reverseDepth && bound.camera.valid){
+        bound.camera=a.host.camera(a.host.player()).value_or(sc::Camera{});
+        if(a.recordingReverseDepth.load() && bound.camera.valid){
             bound.camera.projection.at(2,2)=1-bound.camera.projection.at(2,2);
             bound.camera.projection.at(3,2)=-bound.camera.projection.at(3,2);
         }
@@ -620,14 +630,9 @@ HRESULT STDMETHODCALLTYPE hookFinishCommands(ID3D11DeviceContext *context, BOOL 
     std::vector<bridge::SceneDraw> draws;
     uint64_t epoch{};
     {
-        std::unique_lock guard(appMutex, std::try_to_lock);
-        if (!guard.owns_lock()) {
-            app->recordingGeneration.fetch_add(1);
-            app->finishBusy.fetch_add(1);
-            return result;
-        }
+        std::lock_guard guard(app->recorder.mutex());
         auto &a = *app;
-        if (!a.initialized || context->GetType() != D3D11_DEVICE_CONTEXT_DEFERRED)
+        if (context->GetType() != D3D11_DEVICE_CONTEXT_DEFERRED)
             return result;
         auto found = a.recordings.find(context);
         if (found != a.recordings.end()) {
@@ -677,8 +682,7 @@ void STDMETHODCALLTYPE hookExecuteCommands(ID3D11DeviceContext *context, ID3D11C
     if (!a.initialized || context->GetType() != D3D11_DEVICE_CONTEXT_IMMEDIATE)
         return;
     a.immediateDirty = false;
-    if (!restore)
-        a.bindings.erase(context);
+    if (!restore){std::lock_guard metadataLock(a.recorder.mutex());a.bindings.erase(context);}
     ++a.executedLists;
     if (!captured || captured->resourceEpoch != a.resourceEpoch) {
         // UI/postprocessing lists can be cached or unmarked. They cannot alter
@@ -700,14 +704,13 @@ void STDMETHODCALLTYPE hookTargets(ID3D11DeviceContext *context, UINT count,
                                    ID3D11RenderTargetView *const *views, ID3D11DepthStencilView *depth) {
     originalTargets[I](context, count, views, depth);
     if (!inMod && ready) {
-        std::unique_lock guard(appMutex, std::try_to_lock);
-        if (!guard.owns_lock())
-            return;
         Flag flag;
+        withRecording(context,[&]{
         auto found = app->bindings.find(context);
         if (found != app->bindings.end() && found->second.depth.Get() != depth)
             flushImmediateDepth(context);
         recordTargets(context, depth);
+        });
     }
 }
 template <int I>
@@ -717,23 +720,23 @@ void STDMETHODCALLTYPE hookTargetsUav(ID3D11DeviceContext *context, UINT count,
                                       const UINT *counts) {
     originalTargetsUav[I](context, count, views, depth, start, uavCount, uavs, counts);
     if (count != D3D11_KEEP_RENDER_TARGETS_AND_DEPTH_STENCIL && !inMod && ready) {
-        std::unique_lock guard(appMutex, std::try_to_lock);
-        if (!guard.owns_lock())
-            return;
         Flag flag;
+        withRecording(context,[&]{
         auto found = app->bindings.find(context);
         if (found != app->bindings.end() && found->second.depth.Get() != depth)
             flushImmediateDepth(context);
         recordTargets(context, depth);
+        });
     }
 }
 template <int I>
 void STDMETHODCALLTYPE hookViewports(ID3D11DeviceContext *context, UINT count, const D3D11_VIEWPORT *views) {
     originalViewports[I](context, count, views);
     if (!inMod && ready && count && views) {
-        std::unique_lock guard(appMutex, std::try_to_lock);
-        if (guard.owns_lock())
+        Flag flag;
+        withRecording(context,[&]{
             app->bindings[context].viewport = views[0];
+        });
     }
 }
 template <int I>
@@ -741,24 +744,22 @@ void STDMETHODCALLTYPE hookInstanced(ID3D11DeviceContext *context, UINT count, U
                                      INT base, UINT first) {
     originalInstanced[I](context, count, instances, start, base, first);
     if (!inMod && ready) {
-        std::unique_lock guard(appMutex, std::try_to_lock);
-        if (guard.owns_lock()) {
             Flag flag;
+            withRecording(context,[&]{
             ++app->instancedCalls;
             recordDraw(context, count);
-        }
+            });
     }
 }
 template <int I>
 void STDMETHODCALLTYPE hookDraw(ID3D11DeviceContext *context, UINT count, UINT start, INT base) {
     originalDraw[I](context, count, start, base);
     if (!inMod && ready) {
-        std::unique_lock guard(appMutex, std::try_to_lock);
-        if (guard.owns_lock()) {
             Flag flag;
+            withRecording(context,[&]{
             ++app->indexedCalls;
             recordDraw(context, count);
-        }
+            });
     }
 }
 HRESULT STDMETHODCALLTYPE hookPresent(IDXGISwapChain *swap, UINT interval, UINT flags) {
@@ -840,7 +841,9 @@ HRESULT STDMETHODCALLTYPE hookPresent(IDXGISwapChain *swap, UINT interval, UINT 
                                                 : "Minecraft world displayed; HUD pending.")
                              : (overlaySubmitted ? "HUD displayed; world pending: " + a.worldReason
                                                  : "World: " + a.worldReason + " HUD: " + a.overlayReason);
-        a.heroHidden = submitted && a.hideOriginal && a.host.avatarVisibility(true);
+        bool mcOwnsAvatar=(a.mcStatus.load()&9)==9 && (a.control.flags&bridge::Scene) &&
+                           (a.control.capabilities&bridge::mcOwnerCapability);
+        a.heroHidden = mcOwnsAvatar && a.hideOriginal && a.host.avatarVisibility(true);
         if (!a.heroHidden) a.host.avatarVisibility(false);
         a.hud();
         ImGui::Render();
@@ -891,17 +894,16 @@ HRESULT STDMETHODCALLTYPE hookResize(IDXGISwapChain *swap, UINT count, UINT widt
         a.host.avatarVisibility(false);
         a.target.Reset();
         a.sceneDepth.Reset();
-        a.bindings.clear();
-        a.recordings.clear();
-        a.recordingGeneration.fetch_add(1);
-        ++a.resourceEpoch;
+        {std::lock_guard metadataLock(a.recorder.mutex());
+            a.bindings.clear();a.recordings.clear();
+            a.recordingGeneration.fetch_add(1);++a.resourceEpoch;
+            a.cameraFrame.reset();a.cameraHistory={};}
         a.sceneSnapshot.reset();a.snapshotFrame.reset();a.snapshotCamera={};
         a.snapshotAt=UINT64_MAX;a.immediateDirty=false;
         a.depthScores.clear();
         a.latest.store(nullptr);
         a.renderFrame.reset();
-        a.cameraFrame.reset();a.sceneFrame.reset();a.sceneCamera={};
-        a.cameraHistory={};
+        a.sceneFrame.reset();a.sceneCamera={};
         a.camera.valid = false;
         ImGui_ImplDX11_InvalidateDeviceObjects();
     }

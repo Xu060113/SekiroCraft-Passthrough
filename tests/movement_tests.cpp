@@ -17,10 +17,17 @@ int main() {
             check(draw.acquire(reinterpret_cast<uintptr_t>(&flags), 8, false) && flags == 0b10100000,
                   "disable player draw bit only");
             flags |= 1;
+            flags |= 8;
+            check(draw.acquire(reinterpret_cast<uintptr_t>(&flags),8,false,true) && !(flags&8),
+                  "engine attack resets draw bit, owned visibility reasserts hiding");
             check(draw.release() && flags == 0b10101001, "restore draw preserving foreign flags");
         }
+        {flags=1;sc::OwnedBit draw;draw.acquire(reinterpret_cast<uintptr_t>(&flags),8,false,true);
+            flags|=8;draw.acquire(reinterpret_cast<uintptr_t>(&flags),8,false,true);draw.release();
+            check(flags==1,"originally hidden model remains hidden after release");}
         bridge::PhysicsPacket p;
         p.tick = p.controlTick = GetTickCount64(); p.epoch = 7; p.sequence = 1; p.flags = 1; p.count = 1;
+        p.coverage={{-10,-10,-10},{10,10,10}};
         p.shapes[0] = {{1, 0, -1}, {2, 3, 1}};
         check(bridge::validPhysics(p), "shape validation");
         auto wall = bridge::constrain({0, 0, 0}, {2, 0, .5}, p);
@@ -33,6 +40,13 @@ int main() {
         p.shapes[0] = {{-1, 0, -1}, {1, .5f, 1}};
         auto slab = bridge::constrain({0, 2, 0}, {0, 0, 0}, p);
         check(std::abs(slab.y - .5f) < .001f, "slab voxel shape retained");
+        auto npcFloor=bridge::constrainNpc({0,2,0},{0,0,0},p,7,p.tick);
+        check(std::abs(npcFloor.y-.5f)<.001f,"NPC lands on actual slab shape");
+        check(bridge::constrainNpc({0,2,0},{0,0,0},p,8,p.tick).y==0,"previous-world NPC shapes ignored");
+        check(bridge::constrainNpc({0,2,0},{0,0,0},p,7,p.tick+251).y==0,"stale NPC collision expires");
+        check(bridge::constrainNpc({0,2,0},{0,-8,0},p,7,p.tick).y==-8,"scripted NPC teleport retained");
+        check(bridge::constrainNpc({9.9f,2,0},{9.9f,0,0},p,7,p.tick).y==0,"NPC entire body must be inside coverage");
+        p.flags=0;check(bridge::constrainNpc({0,2,0},{0,0,0},p,7,p.tick).y==0,"incomplete snapshots never become a partial wall");p.flags=1;
         p.shapes[0].max.x = NAN;
         check(!bridge::validPhysics(p), "reject nonfinite shapes");
         p.shapes[0].max.x = 1;
@@ -44,6 +58,34 @@ int main() {
         check(consumer.read(decoded) && decoded.count == 1 && decoded.epoch == 7 &&
               decoded.shapes[0].max.y == .5f, "cross-channel snapshot");
         check(MH_Initialize() == MH_OK, "hook fixture initialize");
+        // Run the production NPC callback against verified fake module chains,
+        // not just the standalone sweep. The same hook still excludes teleports.
+        {
+            std::vector<uint8_t> image(0x3d7a200),root(0x100),npc(0x2100),modules(0x80),physics(0x1000);
+            auto ptr=[](auto &v){return reinterpret_cast<uintptr_t>(v.data());};
+            auto put=[](auto &v,size_t at,auto value){std::memcpy(v.data()+at,&value,sizeof(value));};
+            auto base=ptr(image);
+            const uint8_t store[]{0x0f,0x29,0xb6,0x80,0,0,0};
+            const uint8_t timer[]{0xf3,0x0f,0x58,0x87,0xd0,8,0,0};
+            std::memcpy(image.data()+0xbc4796,store,7);
+            std::fill_n(image.data()+0xbc479d,32,uint8_t(0x90));image[0xbc47bd]=0xc3;
+            std::memcpy(image.data()+0xbc3633,timer,8);
+            DWORD old{};check(VirtualProtect(image.data()+0xbc4000,4096,PAGE_EXECUTE_READWRITE,&old),"executable NPC hook fixture");
+            put(image,0x3d7a1e0,ptr(root));put(root,0x88,base+0x1000);
+            put(physics,8,ptr(npc));put(npc,0x1ff8,ptr(modules));put(modules,0x68,ptr(physics));
+            put(physics,0x80,sc::Vec3{0,1,0});
+            p.shapes[0]={{1,0,-1},{2,3,1}};p.tick=p.controlTick=GetTickCount64();producer.write(p);
+            bridge::Control c;c.epoch=7;c.tickMs=p.tick;c.capabilities=bridge::mcOwnerCapability;
+            bridge::NativeMovement movement;movement.initialize(base,consumer);movement.tryInstall();
+            check(movement.installed(),"install actual production movement hook in fixture");movement.update(c,true);
+            float candidate[4]{2,1,.5f,1};movement.sample(ptr(physics),candidate);
+            check(std::abs(candidate[0]-.7f)<.001f && candidate[2]==.5f && movement.npcCorrections==1,
+                  "production callback constrains NPC while MC owns player");
+            put(modules,0x68,uintptr_t(0));candidate[0]=2;movement.sample(ptr(physics),candidate);
+            check(candidate[0]==2,"reject owner/module mismatch before NPC writes");
+            MH_DisableHook(reinterpret_cast<void*>(base+0xbc4796));MH_RemoveHook(reinterpret_cast<void*>(base+0xbc4796));
+            VirtualProtect(image.data()+0xbc4000,4096,old,&old);
+        }
         scMovementHandler = scTestClobber;
         check(MH_CreateHook(reinterpret_cast<void *>(scTestStore), reinterpret_cast<void *>(scMovementEntry),
                             &scMovementContinue) == MH_OK && MH_EnableHook(reinterpret_cast<void *>(scTestStore)) == MH_OK,

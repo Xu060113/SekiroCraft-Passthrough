@@ -3,6 +3,7 @@
 #include "../src/deferred_scene.hpp"
 #include <iostream>
 #include <fstream>
+#include <thread>
 int checks{};
 void require(bool b, const char *label) {
     ++checks;
@@ -12,6 +13,17 @@ void require(bool b, const char *label) {
     }
 }
 int main() {
+    {
+        bridge::RecordingGate gate;std::mutex present;std::atomic<int> recorded{};
+        std::unique_lock busyPresent(present);
+        std::thread worker([&]{gate.run(true,present,[&]{++recorded;});});worker.join();
+        require(recorded==1,"deferred recording survives a busy Present without losing the command list");
+        bool immediate=true;
+        std::thread immediateWorker([&]{immediate=gate.run(false,present,[&]{++recorded;});});immediateWorker.join();
+        require(!immediate && recorded==1,"immediate capture remains zero-wait while Present owns context");
+        busyPresent.unlock();
+        require(gate.run(false,present,[&]{++recorded;}) && recorded==2,"immediate recording resumes after Present");
+    }
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext> c;
     require(SUCCEEDED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, nullptr, 0,

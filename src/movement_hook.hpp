@@ -29,6 +29,7 @@ class NativeMovement {
     uintptr_t lastPhysics_{};
     sc::Vec3 last_{};
     uint64_t lastTick_{};
+    uint64_t lastPacketRead_{};
     sc::OwnedBit gravity_, noMove_;
     static inline NativeMovement *instance_{};
     static void callback(uintptr_t physics, float *candidate) noexcept {
@@ -36,7 +37,7 @@ class NativeMovement {
     }
     void releaseFlight() { noMove_.release(); gravity_.release(); }
   public:
-    std::atomic<uint64_t> playerCalls{}, correctedMoves{}, flightMoves{};
+    std::atomic<uint64_t> playerCalls{}, correctedMoves{}, flightMoves{},npcCalls{},npcCorrections{};
     bool installed() const { return installed_; }
     bool canFly() const { return canFly_; }
     void driver(NativeDriver &driver){driver_=&driver;}
@@ -74,11 +75,28 @@ class NativeMovement {
         // Every callback may also be an NPC. It must match the current player's
         // owner and module, not a cached pointer from an earlier loading screen.
         if (!sc::readMemory(base_ + 0x3d7a1e0, root) || !sc::readMemory(root + 0x88, hero) ||
-            !sc::readMemory(physics + 8, owner) || owner != hero ||
-            !sc::readMemory(hero + 0x1ff8, state) || !sc::readMemory(state + 0x68, actualPhysics) ||
+            !sc::readMemory(physics + 8, owner) ||
+            !sc::readMemory(owner + 0x1ff8, state) || !sc::readMemory(state + 0x68, actualPhysics) ||
             actualPhysics != physics) return;
-        playerCalls.fetch_add(1, std::memory_order_relaxed);
         uint64_t now = GetTickCount64();
+        if(owner!=hero){
+            npcCalls.fetch_add(1,std::memory_order_relaxed);
+            if(!active_ || !fresh(now,control_.tickMs) || !channel_)return;
+            // One bounded snapshot read per host tick, rather than copying 96 KB
+            // separately for every NPC callback. Busy reads retain original age.
+            if(now-lastPacketRead_>=16){lastPacketRead_=now;channel_->read(packet_);}
+            sc::Vec3 from{},to{candidate[0],candidate[1],candidate[2]};
+            if(!sc::readMemory(physics+0x80,from))return;
+            auto fixed=constrainNpc(from,to,packet_,control_.epoch,now);
+            if(sc::length(fixed-to)>.0001f){
+                npcCorrections.fetch_add(1,std::memory_order_relaxed);
+                candidate[0]=fixed.x;candidate[1]=fixed.y;candidate[2]=fixed.z;
+                if(fixed.y>to.y+.001f && canFly_){float zero{};SIZE_T wrote{};
+                    WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(physics+0x8d0),&zero,sizeof(zero),&wrote);}
+            }
+            return;
+        }
+        playerCalls.fetch_add(1, std::memory_order_relaxed);
         if(combat_)combat_->tick(control_.epoch,active_ && fresh(now,control_.tickMs));
         if (!active_ || !fresh(now, control_.tickMs)) { releaseFlight(); lastPhysics_ = 0; return; }
         if (driver_ && (control_.capabilities & mcOwnerCapability)) {

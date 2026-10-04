@@ -28,11 +28,11 @@ public final class JniPeer {
             throw new AssertionError("quick down/up, individual coordinates and Shift modifier survive one poll");
         if(terrain.get(404)!=1 || terrain.getFloat(200)!=3.5f || terrain.getFloat(24)!=12)
             throw new AssertionError("native terrain grid ABI");
-        var combat=Protocol.direct(2640);
+        var combat=Protocol.direct(3160);
         while(System.currentTimeMillis()<deadline && !NativeBridge.combatState(handle,combat))Thread.sleep(5);
-        if(combat.getLong(24)!=101 || combat.getInt(40)!=250 || combat.getLong(80)!=102 || combat.getFloat(88)!=12 || combat.getInt(108)!=6)
+        if(combat.getLong(24)!=101 || combat.getInt(40)!=250 || combat.getLong(88)!=102 || combat.getFloat(96)!=12 || combat.getInt(116)!=6)
             throw new AssertionError("native actor / life ABI");
-        if(NativeBridge.combatState(handle,Protocol.direct(2639)))throw new AssertionError("short combat destination accepted");
+        if(NativeBridge.combatState(handle,Protocol.direct(3159)))throw new AssertionError("short combat destination accepted");
         var report=Protocol.direct(1600);
         report.putLong(0,NativeBridge.clockMs()).putLong(8,state.epoch()).putLong(16,101).putLong(24,103)
             .putDouble(32,.1).putDouble(40,.05).putLong(48,1).putInt(56,1)
@@ -64,10 +64,11 @@ public final class JniPeer {
         if (!published)
             throw new AssertionError("publish");
         NativeBridge.status(handle, 3, state.epoch());
-        var physics = Protocol.direct(6208);
+        var physics = Protocol.direct(98392);
         physics.putLong(NativeBridge.clockMs()).putLong(state.tickMs()).putLong(state.epoch());
         physics.putInt(7).putInt(1);
         physics.putFloat(0).putFloat(0).putFloat(0).putFloat(.3f).putFloat(1.8f).putInt(0).putLong(99);
+        physics.putFloat(-10).putFloat(-10).putFloat(-10).putFloat(10).putFloat(10).putFloat(10);
         physics.putFloat(-1).putFloat(0).putFloat(-1).putFloat(1).putFloat(.5f).putFloat(1);
         if (!NativeBridge.physics(handle, physics)) throw new AssertionError("physics publish");
         Thread.sleep(200);

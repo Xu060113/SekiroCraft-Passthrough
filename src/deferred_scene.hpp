@@ -7,8 +7,21 @@
 #include <memory>
 #include <new>
 #include <vector>
+#include <mutex>
 
 namespace bridge {
+// Lock order is scene -> metadata for immediate contexts. Deferred workers only
+// touch metadata, so a busy Present never drops their recording boundaries.
+class RecordingGate {
+    std::mutex metadata_;
+  public:
+    std::mutex &mutex(){return metadata_;}
+    template<class F> bool run(bool deferred,std::mutex &scene,F work){
+        std::unique_lock<std::mutex> sceneLock(scene,std::defer_lock);
+        if(!deferred && !sceneLock.try_lock())return false;
+        std::lock_guard metadataLock(metadata_);work();return true;
+    }
+};
 // Capture in the immediate command stream after scene commands execute. Later
 // native clears, UI lists, or untracked commands cannot change this copy.
 class DepthSnapshot {

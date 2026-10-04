@@ -9,8 +9,8 @@ namespace bridge {
 // clamps to max HP and preserves native NoDeath semantics (boss deathblows).
 class NativeCombatAdapter {
     struct Actor {uintptr_t chr{},data{},physics{};uint32_t handle{};uint64_t id{},seen{};};
-    struct Vital {uintptr_t chr{},data{};uint32_t handle{};int32_t hp{},maxHp{};uint8_t bits{};sc::Vec3 position{};uint8_t team{};};
-    uintptr_t base_{};SharedMemory *memory_{};bool ready_{};
+    struct Vital {uintptr_t chr{},data{};uint32_t handle{};int32_t hp{},maxHp{},posture{},maxPosture{},bossNode{};uint8_t bits{};sc::Vec3 position{};uint8_t team{};};
+    uintptr_t base_{};SharedMemory *memory_{};bool ready_{},postureReady_{};
     std::mutex mutex_; std::array<Actor,actorSlots> actors_{};
     uint64_t nextId_{},heroId_{},epoch_{},sequence_{},publishAt_{},session_{},ackCommand_{};
     uintptr_t hero_{},heroData_{}; uint32_t heroHandle_{};
@@ -19,6 +19,7 @@ class NativeCombatAdapter {
     uintptr_t ownedHero_{},ownedData_{};uint32_t ownedHandle_{};uint8_t oldNoDamage_{};bool owned_{};
     using Lookup=uintptr_t(*)(uintptr_t,uint32_t);
     using SetHp=void(*)(uintptr_t,int32_t);
+    using SetPosture=void(*)(uintptr_t,int32_t,uint8_t);
     template<size_t N> bool code(uintptr_t rva,const std::array<uint8_t,N>&expected){std::array<uint8_t,N> a{};
         return sc::readMemory(base_+rva,a) && a==expected;}
     uintptr_t hero()const{uintptr_t root{},p{};return sc::readMemory(base_+0x3d7a1e0,root)&&sc::readMemory(root+0x88,p)?p:0;}
@@ -32,6 +33,10 @@ class NativeCombatAdapter {
            !sc::readMemory(physics+0x80,v.position) || !sc::finite(v.position) || sc::length(v.position)>150000 ||
            !sc::readMemory(v.data+0x130,v.hp) || !sc::readMemory(v.data+0x134,v.maxHp) ||
            !sc::readMemory(v.data+0x228,v.bits) || !sc::readMemory(chr+0x74,v.team))return false;
+        if(postureReady_ && sc::readMemory(v.data+0x148,v.posture) && sc::readMemory(v.data+0x14c,v.maxPosture) &&
+           v.maxPosture>0 && v.maxPosture<=10000000 && v.posture>=0 && v.posture<=v.maxPosture)
+            sc::readMemory(v.data+0x25c,v.bossNode);
+        else v.posture=v.maxPosture=0;
         return v.maxHp>0 && v.maxHp<=10000000 && v.hp>=0 && v.hp<=v.maxHp;
     }
     bool resolves(uintptr_t chr,uint32_t handle)const {
@@ -44,6 +49,13 @@ class NativeCombatAdapter {
         if(!resolves(v.chr,v.handle) || !read(v.chr,current) || current.data!=v.data ||
            current.handle!=v.handle || current.hp!=v.hp || current.maxHp!=v.maxHp)return false;
         reinterpret_cast<SetHp>(base_+0xbd64e0)(v.data,std::clamp(hp,0,v.maxHp));return true;}
+    bool postureDamage(const Vital &v,float amount){Vital current;
+        if(!postureReady_ || !resolves(v.chr,v.handle) || !read(v.chr,current) ||
+           current.data!=v.data || current.handle!=v.handle || current.hp==0 ||
+           current.maxPosture<=0 || (current.bits&24))return false;
+        int target=damageHp(current.posture,current.maxPosture,amount/20.,0);
+        reinterpret_cast<SetPosture>(base_+0xbd6710)(current.data,target,0);return true;
+    }
     void release(){
         if(owned_ && hero()==ownedHero_){Vital v;
             if(read(ownedHero_,v) && v.data==ownedData_ && v.handle==ownedHandle_ && (v.bits&8)){
@@ -61,11 +73,15 @@ class NativeCombatAdapter {
     }
   public:
     std::atomic<uint64_t> observed{},applied{},rejected{},publishedActors{};
+    std::atomic<uint64_t> appliedPosture{};
     void initialize(uintptr_t base,SharedMemory &memory){base_=base;memory_=&memory;
         ready_=base && code(0xbd64e0,std::array<uint8_t,16>{0x48,0x89,0x5c,0x24,0x18,0x89,0x54,0x24,0x10,0x57,0x48,0x83,0xec,0x20,0x8b,0xb9}) &&
             code(0xa4a050,std::array<uint8_t,16>{0x48,0x83,0xec,0x28,0xe8,0x37,0xff,0xff,0xff,0x48,0x85,0xc0,0x74,0x08,0x48,0x8b});
-        sc::log("Native HP setter / handle resolver signatures="+std::to_string(ready_));}
+        postureReady_=ready_ && code(0xbd6710,std::array<uint8_t,16>{0x48,0x89,0x6c,0x24,0x18,0x48,0x89,0x74,0x24,0x20,0x57,0x48,0x83,0xec,0x20,0x41}) &&
+            code(0xbd679a,std::array<uint8_t,8>{0x89,0x87,0x48,0x01,0x00,0x00,0x85,0xdb});
+        sc::log("Native HP / posture signatures="+std::to_string(ready_)+"/"+std::to_string(postureReady_));}
     bool ready()const{return ready_;}
+    bool postureReady()const{return postureReady_;}
     // Present may request a release; zero-wait locking never stalls rendering.
     void releaseIfInactive(bool on){if(on)return;std::unique_lock lock(mutex_,std::try_to_lock);if(lock)release();}
     void observe(uintptr_t physics)noexcept{
@@ -106,13 +122,16 @@ class NativeCombatAdapter {
                 for(auto &a:actors_)if(a.id==cmd.actor && a.chr && resolves(a.chr,a.handle)){
                     Vital v;if(read(a.chr,v) && v.data==a.data && v.handle==a.handle &&
                        sc::length(v.position-player.position)<32 && v.hp>0 && !(v.bits&8)){
-                        success=setHp(v,damageHp(v.hp,v.maxHp,cmd.amount/20.,0));}break;}
+                        success=setHp(v,damageHp(v.hp,v.maxHp,cmd.amount/20.,0));
+                        if(success && postureDamage(v,cmd.amount))appliedPosture.fetch_add(1);
+                    }break;}
                 (success?applied:rejected).fetch_add(1);ackCommand_=seq;
             }
         }
         if(now-publishAt_<50)return;publishAt_=now;
         CombatState out;out.sequence=++sequence_;out.tick=now;out.epoch=epoch;out.hero=heroId_;
-        out.hp=player.hp;out.maxHp=player.maxHp;out.flags=1|(peer && report_.invulnerable?2:0);
+        out.hp=player.hp;out.maxHp=player.maxHp;out.flags=1|(peer && report_.invulnerable?2:0)|(postureReady_?4:0);
+        out.posture=player.posture;out.maxPosture=player.maxPosture;
         out.ackSession=session_;out.ackDamage=damage_;out.ackHeal=heal_;out.ackCommand=ackCommand_;
         if(active)for(auto &a:actors_){if(!a.chr)continue;
             // A stationary actor may stop receiving movement callbacks. Keep it
@@ -124,7 +143,8 @@ class NativeCombatAdapter {
             // individually attackable but never attract the added monster goal.
             bool hostile=v.team==6 || v.team==7 || v.team==9 || v.team==13 || v.team==21 ||
                 v.team==23 || v.team==24 || v.team==27;
-            p.flags=(hostile?1:0)|((v.bits&8)?2:0);
+            p.flags=(hostile?1:0)|((v.bits&8)?2:0)|((v.bits&4)?4:0)|((v.bits&16)?8:0);
+            p.posture=v.posture;p.maxPosture=v.maxPosture;p.bossNode=v.bossNode;
         }
         publishedActors=out.count;memory_->combatState.write(out);
     }

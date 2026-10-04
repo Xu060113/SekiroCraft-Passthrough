@@ -28,6 +28,7 @@ public final class CombatBridge {
     private static volatile boolean serverActive;
     private static final Map<Long,NativeActorProxy> proxies=new HashMap<>();
     private static final HealthLedger health=new HealthLedger();
+    private static final NativeHurtFeedback hurtFeedback=new NativeHurtFeedback();
     private static final AtomicLong sessions=new AtomicLong(System.nanoTime()&Long.MAX_VALUE);
     private static long session,hero,epoch,command,ackCommand;
     private static ServerPlayerEntity owner;
@@ -61,6 +62,7 @@ public final class CombatBridge {
             NativeBridge.combatReport(BridgeClient.handle(),buffer);}
     }
     public static boolean serverActive(){return serverActive;}
+    static CombatProtocol.State snapshot(){return state;}
     public static String status(){var s=state;return s==null?"waiting":("native HP="+s.hp()+"/"+s.maxHp()+" actors="+s.actors().size());}
     public static void hit(long actor,long expectedEpoch,float amount){
         if(!serverActive || expectedEpoch!=epoch || !Float.isFinite(amount) || amount<=0 || amount>10000)return;
@@ -81,11 +83,14 @@ public final class CombatBridge {
         boolean immune=p.isCreative() || p.isSpectator();
         ackCommand=s.ackSession()==session?Math.min(command,s.ackCommand()):0;
         double ad=s.ackSession()==session?s.ackDamage():0,ah=s.ackSession()==session?s.ackHeal():0;
+        boolean nativeHurt=hurtFeedback.update((double)s.hp()/s.maxHp(),ad,ah,immune);
         float maximum=p.getMaxHealth();
         double ratio=health.synchronize(p.getHealth()/maximum,(double)s.hp()/s.maxHp(),ad,ah,immune);
         // Use vanilla's death path, rather than setting zero and bypassing onDeath.
         if(s.hp()==0 && p.isAlive() && !immune)p.damage(p.getDamageSources().genericKill(),Float.MAX_VALUE);
         else if(p.isAlive())p.setHealth((float)(ratio*maximum));
+        if(nativeHurt && p.isAlive())p.networkHandler.sendPacket(
+            new net.minecraft.network.packet.s2c.play.EntityDamageS2CPacket(p,p.getDamageSources().generic()));
         var keep=new HashSet<Long>();
         if(BridgeClient.connected())for(var a:s.actors()){
             if(a.hp()==0)continue;keep.add(a.id());var proxy=proxies.get(a.id());
@@ -105,6 +110,6 @@ public final class CombatBridge {
     }
     /** Server thread only: removes ephemeral actors and discards its delta ledger. */
     public static void release(){serverActive=false;for(var proxy:proxies.values())proxy.discard();proxies.clear();
-        owner=null;hero=epoch=command=ackCommand=0;health.reset();outgoing=null;}
+        owner=null;hero=epoch=command=ackCommand=0;health.reset();hurtFeedback.reset();outgoing=null;}
     public static void resetClient(){state=null;outgoing=null;}
 }

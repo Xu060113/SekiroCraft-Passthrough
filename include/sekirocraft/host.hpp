@@ -121,16 +121,19 @@ class GameHost {
                           [](uintptr_t address, auto &value) { return readMemory(address, value); });
     }
     bool avatarVisibility(bool hideOriginal) {
-        if (!hideOriginal)
-            return avatarHide_.release();
+        uintptr_t root{},hero{};
+        if(supported_)readMemory(base_+0x3d7a1e0,root);
+        if(root)readMemory(root+0x88,hero);
+        if(visibilityHero_ && hero!=visibilityHero_){avatarHide_.abandon();visibilityHero_=0;}
+        if (!hideOriginal){visibilityHero_=0;return avatarHide_.release();}
         // ElaDiDu's 1.06 practice table: player ChrIns + 0x1a11, bit 3 = Draw.
         // DebugFlags.player_hide is AI concealment, not mesh visibility.
         if (!supported_ || !player().valid)
             return false;
-        uintptr_t root{}, hero{};
-        if (!readMemory(base_ + 0x3d7a1e0, root) || !readMemory(root + 0x88, hero) || hero < 65536)
+        if (hero < 65536)
             return false;
-        return avatarHide_.acquire(hero + 0x1a11, 8, false);
+        visibilityHero_=hero;
+        return avatarHide_.acquire(hero + 0x1a11, 8, false, true);
     }
     std::optional<Camera> camera(const PlayerSnapshot &player) const {
         if (!supported_ || !player.valid)
@@ -154,5 +157,6 @@ class GameHost {
     bool supported_{};
     std::filesystem::path executable_;
     OwnedBit avatarHide_;
+    uintptr_t visibilityHero_{};
 };
 } // namespace sc
