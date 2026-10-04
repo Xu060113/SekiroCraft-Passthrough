@@ -3,6 +3,7 @@
 #include "sekirocraft/host.hpp"
 #include "../bridge/physics.hpp"
 #include "native_driver.hpp"
+#include "native_combat.hpp"
 #include <mutex>
 #include <atomic>
 
@@ -23,6 +24,7 @@ class NativeMovement {
     Control control_{};
     bool active_{};
     NativeDriver *driver_{};
+    NativeCombatAdapter *combat_{};
     PhysicsPacket packet_{};
     uintptr_t lastPhysics_{};
     sc::Vec3 last_{};
@@ -38,6 +40,7 @@ class NativeMovement {
     bool installed() const { return installed_; }
     bool canFly() const { return canFly_; }
     void driver(NativeDriver &driver){driver_=&driver;}
+    void combat(NativeCombatAdapter &combat){combat_=&combat;}
     void initialize(uintptr_t base, PhysicsChannel &channel) {
         base_ = base; channel_ = &channel; instance_ = this;
         scMovementHandler = callback;
@@ -66,6 +69,7 @@ class NativeMovement {
     }
     void sample(uintptr_t physics, float *candidate) noexcept {
         std::unique_lock lock(mutex_, std::try_to_lock); if (!lock) return;
+        if(combat_)combat_->observe(physics);
         uintptr_t root{}, hero{}, owner{}, state{}, actualPhysics{};
         // Every callback may also be an NPC. It must match the current player's
         // owner and module, not a cached pointer from an earlier loading screen.
@@ -75,6 +79,7 @@ class NativeMovement {
             actualPhysics != physics) return;
         playerCalls.fetch_add(1, std::memory_order_relaxed);
         uint64_t now = GetTickCount64();
+        if(combat_)combat_->tick(control_.epoch,active_ && fresh(now,control_.tickMs));
         if (!active_ || !fresh(now, control_.tickMs)) { releaseFlight(); lastPhysics_ = 0; return; }
         if (driver_ && (control_.capabilities & mcOwnerCapability)) {
             sc::Vec3 target{};

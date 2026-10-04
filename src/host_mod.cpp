@@ -103,6 +103,7 @@ struct App {
     bridge::SharedMemory memory;
     bridge::NativeMovement movement;
     bridge::NativeDriver driver;
+    bridge::NativeCombatAdapter combat;
     bridge::Compositor compositor;
     bridge::LatestFrame latest;
     std::shared_ptr<bridge::Frame> renderFrame;
@@ -223,6 +224,7 @@ struct App {
                                (playerFeatures && movement.canFly() ? bridge::flightCapability : 0);
         if(playerFeatures && driver.ready() && movement.installed() && movement.canFly())
             control.capabilities |= bridge::mcOwnerCapability | bridge::terrainCapability;
+        if(combat.ready())control.capabilities |= bridge::combatCapability;
         std::fill(control.keys.begin(), control.keys.end(), 0);
         control.buttons = 0;
         if (focused && !showMenu) {
@@ -274,6 +276,7 @@ struct App {
         memory.writeControl(control);
         movement.update(control, playerFeatures && scene && (mcStatus.load() & 1) != 0);
         driver.update(control,mcOwner);
+        combat.releaseIfInactive(mcOwner);
         if (!scene || !focused || showMenu) {
             latest.store(nullptr);
             renderFrame.reset();
@@ -308,6 +311,8 @@ struct App {
                     " executeBusy="+std::to_string(executeBusy.load())+
                     " world="+(worldReason.empty()?"ok":worldReason)+
                     " hud="+(overlayReason.empty()?"ok":overlayReason));
+            sc::log("combatReady="+std::to_string(combat.ready())+" actors="+std::to_string(combat.publishedActors.load())+
+                    " hits="+std::to_string(combat.applied.load())+" rejected="+std::to_string(combat.rejected.load()));
         }
     }
     void hud() {
@@ -340,12 +345,14 @@ struct App {
         ImGui::Text("Native ground hits=%llu / 81 | mouse state/data=%llu/%llu",
             (unsigned long long)driver.terrainHits.load(),(unsigned long long)sc::input::mouseStates.load(),
             (unsigned long long)sc::input::mouseData.load());
+        ImGui::Text("Combat adapter=%s | actors=%llu | applied/rejected hits=%llu/%llu",combat.ready()?"ready":"unavailable",
+            (unsigned long long)combat.publishedActors.load(),(unsigned long long)combat.applied.load(),(unsigned long long)combat.rejected.load());
         ImGui::Checkbox("Hide native hero when MC frame is valid", &hideOriginal);
         ImGui::Checkbox("Host uses reversed Z", &reverseDepth);
         ImGui::TextWrapped("%s", status.c_str());
         ImGui::TextWrapped("%s", compositor.error.c_str());
         ImGui::TextWrapped(
-            "Native terrain is an experimental local height field. Native NPC block collision and cross-game damage remain unavailable.");
+            "Native terrain is a local height field. HP combat is experimental; native boss deathblows and NPC collision with MC blocks remain separate.");
         ImGui::End();
     }
 };
@@ -935,6 +942,8 @@ DWORD WINAPI scBootstrap(void *) {
         }
         app->movement.initialize(app->host.base(), app->memory.physics);
         app->driver.initialize(app->host.base(),app->memory);
+        app->combat.initialize(app->host.base(),app->memory);
+        app->movement.combat(app->combat);
         app->movement.driver(app->driver);
         LARGE_INTEGER counter{};
         QueryPerformanceCounter(&counter);
@@ -986,8 +995,7 @@ DWORD WINAPI scBootstrap(void *) {
                 Sleep(8);
             }
         }).detach();
-        sc::log("Bridge ready; capabilities: camera, input, depth composite. Native collision/combat: "
-                "unavailable.");
+        sc::log("Bridge ready: camera, input, depth composite, local entity terrain and verified native HP adapter.");
     } catch (const std::exception &e) {
         sc::log(std::string("Bootstrap: ") + e.what());
     } catch (...) {

@@ -31,10 +31,13 @@ final class TerrainGeometry {
         double cx=packet.getFloat(24),cy=packet.getFloat(28),cz=packet.getFloat(32);
         // The native sampler uses fixed world cells, whose centers are n*0.5+0.25.
         long centerX=Math.round((cx-.25)/.5),centerZ=Math.round((cz-.25)/.5);
+        // Each packet can be a peripheral patch. Evict relative to the player, not
+        // that patch, otherwise the next patch would erase recently sampled neighbors.
+        long playerX=(long)Math.floor(state.px()/.5),playerZ=(long)Math.floor(state.pz()/.5);
         cells.entrySet().removeIf(entry -> !retained(now,entry.getValue().tick()) ||
-            Math.abs(entry.getKey().x()-centerX)>12 || Math.abs(entry.getKey().z()-centerZ)>12);
+            Math.abs(entry.getKey().x()-playerX)>16 || Math.abs(entry.getKey().z()-playerZ)>16);
         known.entrySet().removeIf(entry -> !retained(now,entry.getValue()) ||
-            Math.abs(entry.getKey().x()-centerX)>12 || Math.abs(entry.getKey().z()-centerZ)>12);
+            Math.abs(entry.getKey().x()-playerX)>16 || Math.abs(entry.getKey().z()-playerZ)>16);
         for(int z=0;z<9;++z)for(int x=0;x<9;++x){
             int index=z*9+x;
             var key=new Key(centerX+x-4,centerZ+z-4);
@@ -54,6 +57,18 @@ final class TerrainGeometry {
         return List.copyOf(cells.values());
     }
     static boolean retained(long now,long tick){return tick>0 && now>=tick && now-tick<=RETAIN_MS;}
+    /** A limited neighbor check for short non-player sampling waits. */
+    static boolean touchesKnown(Map<Key,Long> known,double size,Box probe,long now){
+        if(known.isEmpty() || size<=0)return false;
+        long minX=(long)Math.floor(probe.minX/size),maxX=(long)Math.floor(probe.maxX/size);
+        long minZ=(long)Math.floor(probe.minZ/size),maxZ=(long)Math.floor(probe.maxZ/size);
+        if(maxX-minX>32 || maxZ-minZ>32)return false;
+        for(long z=minZ;z<=maxZ;++z)for(long x=minX;x<=maxX;++x){
+            Long tick=known.get(new Key(x,-z-1));
+            if(tick!=null && retained(now,tick))return true;
+        }
+        return false;
+    }
     /** All fixed X/Z cells touched by the feet's swept box must have completed rays. */
     static boolean covers(Map<Key,Long> known,double size,Box swept,long now){
         if(known.isEmpty() || !Double.isFinite(size) || size<=0)return false;
@@ -66,6 +81,15 @@ final class TerrainGeometry {
             if(tick==null || !retained(now,tick))return false;
         }
         return true;
+    }
+    static boolean supports(Box feet,List<Surface> surfaces,long now,double tolerance){
+        for(var surface:surfaces){
+            var box=surface.box();
+            if(retained(now,surface.tick()) && Math.abs(box.maxY-feet.minY)<=tolerance &&
+               feet.maxX>box.minX+1e-7 && feet.minX<box.maxX-1e-7 &&
+               feet.maxZ>box.minZ+1e-7 && feet.minZ<box.maxZ-1e-7)return true;
+        }
+        return false;
     }
     static double recovery(Box feet,List<Surface> surfaces,long now,double stepHeight){
         double target=feet.minY;

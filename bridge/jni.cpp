@@ -77,6 +77,19 @@ JNIEXPORT jboolean JNICALL Java_dev_sekirobridge_NativeBridge_player(JNIEnv *env
     bridge::PlayerPacket p;std::memcpy(&p,ptr,sizeof(p));
     return bridge::validPlayer(p) && reinterpret_cast<bridge::SharedMemory*>(handle)->player.write(p);
 }
+JNIEXPORT jboolean JNICALL Java_dev_sekirobridge_NativeBridge_combatState(JNIEnv *env,jclass,jlong handle,jobject b) {
+    if(!handle || !b || env->GetDirectBufferCapacity(b)<jlong(sizeof(bridge::CombatState)))return false;
+    auto ptr=env->GetDirectBufferAddress(b);if(!ptr)return false;
+    bridge::CombatState p;
+    if(!reinterpret_cast<bridge::SharedMemory*>(handle)->combatState.read(p) || !bridge::validCombat(p))return false;
+    std::memcpy(ptr,&p,sizeof(p));return true;
+}
+JNIEXPORT jboolean JNICALL Java_dev_sekirobridge_NativeBridge_combatReport(JNIEnv *env,jclass,jlong handle,jobject b) {
+    if(!handle || !b || env->GetDirectBufferCapacity(b)<jlong(sizeof(bridge::CombatReport)))return false;
+    auto ptr=env->GetDirectBufferAddress(b);if(!ptr)return false;
+    bridge::CombatReport p;std::memcpy(&p,ptr,sizeof(p));
+    return bridge::validCombat(p) && reinterpret_cast<bridge::SharedMemory*>(handle)->combatReport.write(p);
+}
 JNIEXPORT jboolean JNICALL Java_dev_sekirobridge_NativeBridge_terrain(JNIEnv *env,jclass,jlong handle,jobject b) {
     if(!handle || !b || env->GetDirectBufferCapacity(b)<jlong(sizeof(bridge::TerrainPacket)))return false;
     auto ptr=env->GetDirectBufferAddress(b);if(!ptr)return false;

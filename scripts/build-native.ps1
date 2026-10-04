@@ -26,6 +26,10 @@ $imgui=@('imgui.cpp','imgui_draw.cpp','imgui_tables.cpp','imgui_widgets.cpp','ba
 if($LASTEXITCODE){throw 'Host DLL build failed'}
 Copy-Item -LiteralPath "$projectRoot\config\sekirobridge.ini" -Destination "$packageRoot\sekirobridge.ini" -Force
 if(!$SkipTests){
+    & $cpp @common "$projectRoot\tests\combat_tests.cpp" '-lbcrypt' '-o' "$buildRoot\combat_tests.exe"
+    if($LASTEXITCODE){throw 'Combat fixture build failed'}
+    & "$buildRoot\combat_tests.exe"
+    if($LASTEXITCODE){throw 'Combat checks failed'}
     & $cpp @common "$projectRoot\tests\movement_tests.cpp" "$projectRoot\tests\movement_fixture.S" "$projectRoot\src\movement_hook.cpp" "$projectRoot\src\movement_stub.S" @objects '-lbcrypt' '-o' "$buildRoot\movement_tests.exe"
     if($LASTEXITCODE){throw 'Movement fixture build failed'}
     & "$buildRoot\movement_tests.exe"

@@ -9,6 +9,7 @@
 #include "protocol.hpp"
 #include "physics.hpp"
 #include "session.hpp"
+#include "combat.hpp"
 #include <string>
 #include <memory>
 
@@ -54,6 +55,8 @@ class SharedMemory {
     SnapshotChannel<InputPacket> input;
     SnapshotChannel<PlayerPacket> player;
     SnapshotChannel<TerrainPacket> terrain;
+    SnapshotChannel<CombatState> combatState;
+    SnapshotChannel<CombatReport> combatReport;
     ~SharedMemory() { close(); }
     SharedMemory() = default;
     SharedMemory(const SharedMemory &) = delete;
@@ -73,7 +76,8 @@ class SharedMemory {
             return false;
         if (!physics.open(channel)) return false;
         if (!input.open(channel,L"input-v2") || !player.open(channel,L"player-v2") ||
-            !terrain.open(channel,L"terrain-v2")) {close();return false;}
+            !terrain.open(channel,L"terrain-v2") || !combatState.open(channel,L"combat-state-v1") ||
+            !combatReport.open(channel,L"combat-report-v1")) {close();return false;}
         auto name = L"Local\\SekiroBridge-" + channel;
         mutex_ = CreateMutexW(nullptr, FALSE, (name + L"-lock").c_str());
         mapping_ = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, DWORD(mappingBytes),
@@ -102,6 +106,7 @@ class SharedMemory {
     void close() {
         physics.close();
         input.close(); player.close(); terrain.close();
+        combatState.close();combatReport.close();
         if (bytes_)
             UnmapViewOfFile(bytes_);
         if (mapping_)

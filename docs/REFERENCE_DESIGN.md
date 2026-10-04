@@ -28,9 +28,13 @@ SkyCraft 当前已经导出 MC 方块/流体网格，交给 Skyrim 绘制；Fram
 
 ## 尚未移植的部分
 
+后续 `gameplay1` 加入原生生物代理和血量增量回传。原生实体从已校验的物理回调观察，通过当前 WorldChrMan handle resolver 核对身份；字段和分类参考 [sekiro-coop live.rs](https://github.com/mstampfli/sekiro-coop/blob/main/crates/sekiro-sdk-sys/src/live.rs) 与 [soulsmods Sekiro EMEDF](https://soulsmods.github.io/emedf/sekiro-emedf.html)。玩家 NoDamage 位另外与本地 SekiroTool/ElaDiDu 1.06 定义核对。HP setter 的 ABI、clamp 与 NoDeath 分支由本机已加载 1.06 代码的离线反汇编确认，运行时再次检查指纹。没有复制参考项目源文件，没有调用猜测的 ApplyDamage 函数。
+
+MC 中不可见、禁止保存的命中实体接收原版近战/投射物/爆炸/怪物伤害。HP 与创造无敌由独立双向状态通道传递，伤害命令带递增序号，玩家伤害/治疗是累计增量并带确认，避免反馈环。实体地面扩展到两端同一维度的 MC 生物、TNT 和掉落物；真实 OpenAL 声音在 MC 后台播放。
+
 当前仍使用分层图像合成，**没有完成 SkyCraft 式的 MC 网格原生渲染器**。这一路线需要另建网格/材质传输、只狼场景绘制与光照接口，以及角色动画和透明材质处理；不能只换几个地址。
 
-只狼目前只有已校验的向下射线接口，9×9 高度采样只描述附近地面；“已知格”不代表墙壁、屋顶或整个垂直空间已知。SkyCraft 的 Havok 区域导出依赖 Skyrim/SKSE 的对象结构，GTA 的隐藏碰撞道具也依赖 ScriptHookV。完整墙顶、多层地形、只狼 NPC 碰撞 MC 方块和跨游戏战斗仍需独立实现，不列为本版已完成功能。
+只狼射线高度采样仍只描述附近地面；“已知格”不代表墙壁、屋顶或整个垂直空间已知。SkyCraft 的 Havok 区域导出依赖 Skyrim/SKSE 的对象结构，GTA 的隐藏碰撞道具依赖 ScriptHookV。完整墙顶、多层地形、只狼 NPC 碰撞 MC 方块、原生受击/姿态/忍杀及原生 NPC 反击 MC 怪物仍需独立实现。当前 HP 交互不等于完整战斗管线。
 
 右键原生地面当前只保证普通方块的顶面目标。需要真实支撑块的特殊方块、原生墙面放置和挖掘原生地形不在本版范围内。非整数高度可能产生不到一个 MC 格的离地间隙。
 

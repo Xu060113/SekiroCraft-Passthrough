@@ -87,6 +87,29 @@ public final class TerrainSelfTest {
             "native virtual terrain only exposes top faces");
         require(TerrainGeometry.raycast(fractional,1100,new Vec3d(.5,11,-.5),new Vec3d(.5,9.5,-.5))==null,
             "nearest real MC target clips native ray before rounding its placement cell");
+        var clientWorld=new Object();var serverWorld=new Object();
+        var scope=new TerrainEntityPolicy.Scope(clientWorld,serverWorld);
+        require(TerrainEntityPolicy.applies(scope,serverWorld,net.minecraft.entity.TntEntity.class),"ignited TNT on integrated server receives terrain");
+        require(TerrainEntityPolicy.applies(scope,clientWorld,net.minecraft.entity.TntEntity.class),"client TNT receives matching terrain");
+        require(TerrainEntityPolicy.applies(scope,serverWorld,net.minecraft.entity.FallingBlockEntity.class),"falling sand receives terrain");
+        require(TerrainEntityPolicy.applies(scope,serverWorld,net.minecraft.entity.ItemEntity.class),"dropped items receive terrain");
+        require(TerrainEntityPolicy.applies(scope,serverWorld,net.minecraft.entity.mob.ZombieEntity.class),"spawned monsters receive terrain");
+        require(!TerrainEntityPolicy.applies(scope,new Object(),net.minecraft.entity.TntEntity.class),"other dimensions untouched");
+        require(!TerrainEntityPolicy.applies(scope,serverWorld,NativeActorProxy.class),"native actor proxies excluded from MC terrain movement");
+        var wait=new TerrainEntityPolicy.Wait();
+        require(wait.hold(false,true,1000),"nearby entity briefly waits for unknown sample");
+        require(!wait.hold(false,true,1500),"entity wait expires without freezing TNT fuse forever");
+        require(!wait.hold(false,false,1600),"distant entity never waits");
+        require(!wait.hold(true,true,1700),"known empty sample releases entity");
+        var tntBox=new Box(.01,10,-.49,.99,10.98,.49);
+        require(Math.abs(VoxelShapes.cuboid(new Box(-1,6,-1,2,10,2)).calculateMaxDistance(Direction.Axis.Y,tntBox,-.4))<1e-7,
+            "vanilla TNT footprint cannot fall through sampled ground");
+        require(TerrainGeometry.supports(feet,cells,1100,.025),"native floor supplies stone footstep contact");
+        require(!TerrainGeometry.supports(feet.offset(0,.5,0),cells,1100,.025),"airborne entity has no footstep support");
+        var expanded=new TerrainGeometry();expanded.merge(state,sample(1,1000,.25f,.25f,10),1000);
+        var outer=expanded.merge(state,sample(2,1100,4.25f,4.25f,10),1100);
+        require(outer.size()==2,"peripheral patch retains center collision");
+        require(expanded.merge(state,sample(3,1200,-3.75f,-3.75f,10),1200).size()==3,"outer patches merge around player anchor");
         System.out.println(checks+" terrain stability and native placement checks passed");
     }
     public static void main(String[] args){run();}

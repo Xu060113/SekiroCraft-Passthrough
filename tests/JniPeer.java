@@ -28,6 +28,19 @@ public final class JniPeer {
             throw new AssertionError("quick down/up, individual coordinates and Shift modifier survive one poll");
         if(terrain.get(404)!=1 || terrain.getFloat(200)!=3.5f || terrain.getFloat(24)!=12)
             throw new AssertionError("native terrain grid ABI");
+        var combat=Protocol.direct(2640);
+        while(System.currentTimeMillis()<deadline && !NativeBridge.combatState(handle,combat))Thread.sleep(5);
+        if(combat.getLong(24)!=101 || combat.getInt(40)!=250 || combat.getLong(80)!=102 || combat.getFloat(88)!=12 || combat.getInt(108)!=6)
+            throw new AssertionError("native actor / life ABI");
+        if(NativeBridge.combatState(handle,Protocol.direct(2639)))throw new AssertionError("short combat destination accepted");
+        var report=Protocol.direct(1600);
+        report.putLong(0,NativeBridge.clockMs()).putLong(8,state.epoch()).putLong(16,101).putLong(24,103)
+            .putDouble(32,.1).putDouble(40,.05).putLong(48,1).putInt(56,1)
+            .putLong(64,1).putLong(72,102).putFloat(80,7);
+        if(!NativeBridge.combatReport(handle,report))throw new AssertionError("combat injury report");
+        report.putFloat(80,Float.NaN);
+        if(NativeBridge.combatReport(handle,report))throw new AssertionError("invalid injury accepted");
+        report.putFloat(80,7);
         var player=Protocol.direct(104);
         player.putLong(77).putLong(NativeBridge.clockMs()).putLong(state.tickMs()).putLong(state.epoch());
         player.putInt(5).putFloat(180).putFloat(12).putFloat(4).putFloat(8);
@@ -59,6 +72,6 @@ public final class JniPeer {
         if (!NativeBridge.physics(handle, physics)) throw new AssertionError("physics publish");
         Thread.sleep(200);
         NativeBridge.close(handle);
-        System.out.println("Java peer published real frame planes and collision/flight state");
+        System.out.println("Java peer published frame, collision, health, creative state and actor injury");
     }
 }

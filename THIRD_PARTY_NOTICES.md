@@ -14,4 +14,6 @@
 
 - Camera-interface research: Jim2point0's public Sekiro photo-mode table at https://framedsc.com/CheatTables/sekiro_photoModeUpdated.CT . The table was inspected, not executed or distributed. The final current-ChrCam adapter was independently located in the running local 1.06 code by read-only inspection. Native ray output argument ordering was checked against the engine's local call site. No dumped executable or decompiled game classes enter Git or releases.
 
+- HP and team interface facts: https://github.com/mstampfli/sekiro-coop/blob/main/crates/sekiro-sdk-sys/src/live.rs and https://soulsmods.github.io/emedf/sekiro-emedf.html . Local loaded 1.06 disassembly independently confirms the handle resolver and HP field setter ABI/clamp/NoDeath branch. Creative protection is player-only, checked against the existing SekiroTool and ElaDiDu references. Combat protocol, ownership, health ledger and MC entity adapter are newly written; no external trainer is executed and no dumped code is included.
+
 Minecraft and Sekiro are not bundled. No game textures, maps, skins, source or decompiled game classes are included. The optional development caches are excluded from Git and distribution.

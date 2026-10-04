@@ -27,6 +27,19 @@ Coordinates: Sekiro `(x,y,z)` to MC `(x×scale,y×scale+y_offset,-z×scale)`. MC
 
 ## MC ownership side channels
 
+`gameplay1` adds capability 1024 for the HP adapter. Legacy bit 32 still reserves the full native ApplyDamage pipeline, which is unavailable. The new channels use the same zero-wait snapshot locks; the main frame/control ABI is unchanged.
+
+| Suffix | Bytes | Header and records |
+| --- | ---: | --- |
+| `combat-state-v1` | 2640 | sequence/tick/epoch/hero ID/ack hit at 0/8/16/24/32; HP/maxHP/flags/count at 40/44/48/52; ack damage/healing doubles at 56/64; ack session at 72; 64 actor records at 80 |
+| `combat-report-v1` | 1600 | tick/epoch/hero/session at 0/8/16/24; cumulative normalized player damage/healing doubles at 32/40; newest hit at 48; creative flag/reserved at 56/60; 64 commands at 64 |
+
+Actor records are 40 bytes: opaque ID at 0, host xyz floats at 8, HP/maxHP at 20/24, team/flags at 28/32, padding at 36. Flags: hostile=1, native NoDamage=2. No native pointer crosses IPC. Commands are 24 bytes: sequence/actor ID at 0/8, MC health-point float at 16, reserved at 20. Unacknowledged hits are never overwritten. The host consumes each sequence once, revalidates current native handle, entity/module and HP, applies or rejects it, then acknowledges. 20 MC health points map to one full native life. This does not emulate posture, hit reactions, deathblows, attribution or rewards.
+
+Player health sends cumulative normalized damage/healing, with acknowledgements removing prediction so native injury cannot bounce back as a second MC injury. Initial native HP seeds the MC bar. Hero, epoch or player identity changes reset the session. JNI runs only on the client thread; server reports are immutable bytes. A live client refreshes transport time while the integrated server pauses, retaining creative protection without adding injury. Explicit off stops publication. Only current-hero NoDamage is owned; its original bit is restored, never an old HP value.
+
+Terrain retains the 81-ray/50ms budget but alternates center with eight patches offset by 4m. Center refresh is 100ms, full outer cycle 800ms. Cache eviction anchors to the player. The matching client/server dimension now applies native shapes to MC living entities, TNT, falling blocks and items; native actor proxies are excluded. Nearby non-player unknown waits expire at 500ms and never stop Entity.tick or the TNT fuse. The older player-only descriptions below record the pre-gameplay1 implementation.
+
 All use the same zero-timeout mutex snapshot model and channel name with their suffix; the main mapping size remains unchanged.
 
 | Suffix | Size | Layout |

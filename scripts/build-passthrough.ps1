@@ -22,6 +22,7 @@ Copy-Item -LiteralPath "$projectRoot\docs\RETURN_TEST.md" -Destination "$package
 Copy-Item -LiteralPath "$projectRoot\docs\PROTOCOL.md" -Destination "$packageRoot\docs\PROTOCOL.md" -Force
 Copy-Item -LiteralPath "$projectRoot\docs\FEATURE_TEST.md" -Destination "$packageRoot\docs\FEATURE_TEST.md" -Force
 Copy-Item -LiteralPath "$projectRoot\docs\REFERENCE_DESIGN.md" -Destination "$packageRoot\docs\REFERENCE_DESIGN.md" -Force
+Copy-Item -LiteralPath "$projectRoot\docs\GAMEPLAY_TEST.md" -Destination "$packageRoot\docs\GAMEPLAY_TEST.md" -Force
 Copy-Item -LiteralPath "$projectRoot\licenses\SekiroTool-LICENSE.txt" -Destination "$packageRoot\SekiroTool-LICENSE.txt" -Force
 Copy-Item -LiteralPath "$PSScriptRoot\switch-sekiro.ps1","$PSScriptRoot\prepare-minecraft.ps1" -Destination "$packageRoot\scripts" -Force
 $workspaceRoot=[IO.Path]::GetFullPath((Join-Path $projectRoot '..\..'))
@@ -29,7 +30,7 @@ $dependencyRoot=Join-Path $projectRoot 'third_party'
 if(!(Test-Path -LiteralPath $dependencyRoot)){$dependencyRoot=Join-Path $workspaceRoot 'third_party'}
 Copy-Item -LiteralPath "$dependencyRoot\minhook\LICENSE.txt" -Destination "$packageRoot\MinHook-LICENSE.txt" -Force
 Copy-Item -LiteralPath "$dependencyRoot\imgui\LICENSE.txt" -Destination "$packageRoot\ImGui-LICENSE.txt" -Force
-$manifest=@{version='0.1.0';patch='mc-owner2-renderfix1';gameLaunched=$false;installed=$false;fullPort=$false;verified=(-not $SkipTests);capabilities=@('MC player control','ordered input events','completed frame camera pairing','depth-composite','independent fresh overlay','native ground block placement');experimental=@('native camera adapter, runtime instruction gated','fixed world terrain cells with bounded cache, known coverage guard and shallow recovery');pending=@('real-game feature acceptance','full native terrain collision geometry','NPC/Havok block collision','cross-game combat','map and save-slot binding');files=@(Get-ChildItem -LiteralPath $packageRoot -Recurse -File|ForEach-Object{@{name=[IO.Path]::GetRelativePath($packageRoot,$_.FullName);sha256=(Get-FileHash -LiteralPath $_.FullName).Hash}})}
+$manifest=@{version='0.1.0';patch='gameplay1';gameLaunched=$false;installed=$false;fullPort=$false;verified=(-not $SkipTests);capabilities=@('MC player control','ordered input events','completed frame camera pairing','depth-composite','independent fresh overlay','native ground block placement','background MC audio');experimental=@('nearby MC entity ground collision','native actor HP proxy combat','spawned hostile mob targets and local steering','bidirectional player health delta ledger','owned native player creative NoDamage');pending=@('real-game feature acceptance','full native terrain collision geometry','NPC/Havok block collision','native ApplyDamage/posture/deathblow/rewards','native NPC targeting MC mobs','map and save-slot binding');files=@(Get-ChildItem -LiteralPath $packageRoot -Recurse -File|ForEach-Object{@{name=[IO.Path]::GetRelativePath($packageRoot,$_.FullName);sha256=(Get-FileHash -LiteralPath $_.FullName).Hash}})}
 $manifest|ConvertTo-Json -Depth 6|Set-Content -LiteralPath "$projectRoot\build\verification.json" -Encoding UTF8
 Compress-Archive -LiteralPath $packageRoot -DestinationPath "$projectRoot\dist\SekiroCraft-Passthrough-0.1.0.zip" -Force
 Get-FileHash -LiteralPath "$projectRoot\dist\SekiroCraft-Passthrough-0.1.0.zip"

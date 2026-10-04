@@ -36,4 +36,6 @@ public final class NativeBridge {
     public static native boolean input(long handle, ByteBuffer packet);
     public static native boolean player(long handle, ByteBuffer packet);
     public static native boolean terrain(long handle, ByteBuffer packet);
+    public static native boolean combatState(long handle, ByteBuffer packet);
+    public static native boolean combatReport(long handle, ByteBuffer packet);
 }

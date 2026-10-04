@@ -12,6 +12,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public interface CollisionViewMixin {
     @Inject(method="getBlockCollisions",at=@At("RETURN"),cancellable=true)
     default void bridgeTerrain(Entity entity,Box box,CallbackInfoReturnable<Iterable<VoxelShape>> cir){
-        cir.setReturnValue(NativeTerrain.add(entity,box,cir.getReturnValue()));
+        cir.setReturnValue(NativeTerrain.add(this,entity,box,cir.getReturnValue()));
     }
 }

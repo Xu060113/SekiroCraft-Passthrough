@@ -81,6 +81,8 @@ public final class BridgeClient implements ClientModInitializer {
         if(!connected && wasConnected)PLAYERS.reset();
         wasConnected=connected;
         if(connected)NativeTerrain.poll(state);
+        AudioBridge.tick();
+        CombatBridge.poll();
         if (handle != 0)
             NativeBridge.status(handle, connected() ? (1 | 8 | (client.currentScreen != null ? 2 : 0) |
                 (client.player != null && client.player.getAbilities().flying &&
@@ -99,6 +101,7 @@ public final class BridgeClient implements ClientModInitializer {
         armed = false;
         wasConnected=false;
         PLAYERS.reset();renderPose=null;
+        AudioBridge.release();CombatBridge.resetClient();
         if (previousPerspective != null) {
             MinecraftClient.getInstance().options.setPerspective(previousPerspective);
             previousPerspective = null;
@@ -107,6 +110,7 @@ public final class BridgeClient implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         var client = MinecraftClient.getInstance();
+        CombatBridge.initialize();
         try {
             var root = client.runDirectory.toPath().resolve("sekirobridge");
             Files.createDirectories(root);
@@ -164,7 +168,7 @@ public final class BridgeClient implements ClientModInitializer {
                             ctx.getSource().sendFeedback(
                                 Text.literal("JNI=" + (handle != 0) + " armed=" + armed +
                                              " active=" + active() + " terrainReady=" + NativeTerrain.ready() +
-                                             " frames=" + FRAMES.published));
+                                             " frames=" + FRAMES.published+" audio="+AudioBridge.status()+" combat="+CombatBridge.status()));
                             return Command.SINGLE_SUCCESS;
                         }))));
         ClientTickEvents.START_CLIENT_TICK.register(c -> {
@@ -180,8 +184,10 @@ public final class BridgeClient implements ClientModInitializer {
                 PHYSICS.update(state);
             }
         });
-        ServerTickEvents.END_SERVER_TICK.register(server -> PLAYERS.server(server, connected() ? state : null));
-        ServerLifecycleEvents.SERVER_STOPPING.register(server -> PLAYERS.server(server, null));
+        ServerTickEvents.END_SERVER_TICK.register(server -> {
+            CombatBridge.server(server);PLAYERS.server(server, connected() ? state : null);
+        });
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> {CombatBridge.release();PLAYERS.server(server, null);});
         ClientLifecycleEvents.CLIENT_STOPPING.register(c -> {
             disarm();
             INPUT.release();

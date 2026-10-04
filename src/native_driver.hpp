@@ -20,6 +20,7 @@ class NativeDriver {
     std::atomic<uint64_t> cameraEpoch_{}, controlTick_{};
     bool enabled_{}, installed_{}, rayReady_{};
     uint64_t retry_{}, terrainTick_{}, terrainSequence_{};
+    uint64_t terrainEpoch_{};unsigned terrainPatch_{};bool outerPatch_{};
     static inline NativeDriver *instance_{};
     using CastRay=bool(*)(uintptr_t,uint32_t,const float*,const float*,float*,float*,float*,uintptr_t*);
     static void cameraCallback(uintptr_t camera) noexcept {if(instance_)instance_->camera(camera);}
@@ -33,9 +34,15 @@ class NativeDriver {
     void terrain(uint64_t now,uint64_t epoch,sc::Vec3 center) {
         if(!rayReady_ || now-terrainTick_<50)return;
         terrainTick_=now;
+        if(terrainEpoch_!=epoch){terrainEpoch_=epoch;terrainPatch_=0;outerPatch_=false;}
         uintptr_t manager{},world{};
         if(!sc::readMemory(base_+0x3d6d640,manager) || !sc::readMemory(manager+0x98,world) || world<65536)return;
         center.x=terrainCellCenter(center.x);center.z=terrainCellCenter(center.z);
+        // Keep the same 81-ray budget. Refresh the center every 100 ms and rotate
+        // eight peripheral patches every 800 ms, within the 1500 ms cell lifetime.
+        if(outerPatch_){constexpr int offsets[8][2]{{-4,-4},{0,-4},{4,-4},{-4,0},{4,0},{-4,4},{0,4},{4,4}};
+            center.x+=offsets[terrainPatch_][0];center.z+=offsets[terrainPatch_][1];terrainPatch_=(terrainPatch_+1)%8;}
+        outerPatch_=!outerPatch_;
         TerrainPacket p; p.sequence=++terrainSequence_; p.tick=now; p.epoch=epoch;p.center=center;
         auto cast=reinterpret_cast<CastRay>(base_+0x94cc50);
         // SekiroTool identifies this routine; the loaded 1.06 disassembly confirms

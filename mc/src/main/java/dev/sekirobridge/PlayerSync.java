@@ -44,5 +44,5 @@ final class PlayerSync {
     }
     void reset(){clientIdentity=null;clientEpoch=0;NativeTerrain.clear();}
     private void release(){if(owned!=null){owned.setNoGravity(oldGravity);owned.noClip=oldClip;owned.setVelocity(Vec3d.ZERO);
-        owned.teleport(owned.getServerWorld(),originalPosition.x,originalPosition.y,originalPosition.z,originalYaw,originalPitch);owned=null;}}
+        if(owned.isAlive())owned.teleport(owned.getServerWorld(),originalPosition.x,originalPosition.y,originalPosition.z,originalYaw,originalPitch);owned=null;}}
 }
