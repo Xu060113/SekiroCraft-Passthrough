@@ -224,7 +224,8 @@ struct App {
                                (playerFeatures && movement.canFly() ? bridge::flightCapability : 0);
         if(playerFeatures && driver.ready() && movement.installed() && movement.canFly())
             control.capabilities |= bridge::mcOwnerCapability | bridge::terrainCapability;
-        if(combat.ready())control.capabilities |= bridge::combatCapability;
+        if(playerFeatures && combat.ready() && (control.capabilities & bridge::mcOwnerCapability))
+            control.capabilities |= bridge::combatCapability;
         std::fill(control.keys.begin(), control.keys.end(), 0);
         control.buttons = 0;
         if (focused && !showMenu) {
