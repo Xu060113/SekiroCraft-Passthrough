@@ -1,6 +1,7 @@
 #pragma once
 #include "sekirocraft/host.hpp"
 #include "../bridge/shared_memory.hpp"
+#include "combat_trace.hpp"
 #include <atomic>
 #include <mutex>
 namespace bridge {
@@ -34,8 +35,11 @@ class NativeCombatAdapter {
            !sc::readMemory(v.data+0x130,v.hp) || !sc::readMemory(v.data+0x134,v.maxHp) ||
            !sc::readMemory(v.data+0x228,v.bits) || !sc::readMemory(chr+0x74,v.team))return false;
         if(postureReady_ && sc::readMemory(v.data+0x148,v.posture) && sc::readMemory(v.data+0x14c,v.maxPosture) &&
-           v.maxPosture>0 && v.maxPosture<=10000000 && v.posture>=0 && v.posture<=v.maxPosture)
-            sc::readMemory(v.data+0x25c,v.bossNode);
+           v.maxPosture>0 && v.maxPosture<=10000000 && v.posture>=-100 && v.posture<=v.maxPosture){
+            // The engine permits a negative remainder while posture is broken.
+            // Publish a full gauge without discarding its maximum or phase data.
+            v.posture=std::max(0,v.posture);sc::readMemory(v.data+0x25c,v.bossNode);
+        }
         else v.posture=v.maxPosture=0;
         return v.maxHp>0 && v.maxHp<=10000000 && v.hp>=0 && v.hp<=v.maxHp;
     }
@@ -48,12 +52,14 @@ class NativeCombatAdapter {
     bool setHp(const Vital &v,int hp){Vital current;
         if(!resolves(v.chr,v.handle) || !read(v.chr,current) || current.data!=v.data ||
            current.handle!=v.handle || current.hp!=v.hp || current.maxHp!=v.maxHp)return false;
+        BridgeVitalWrite write;
         reinterpret_cast<SetHp>(base_+0xbd64e0)(v.data,std::clamp(hp,0,v.maxHp));return true;}
     bool postureDamage(const Vital &v,float amount){Vital current;
         if(!postureReady_ || !resolves(v.chr,v.handle) || !read(v.chr,current) ||
            current.data!=v.data || current.handle!=v.handle || current.hp==0 ||
-           current.maxPosture<=0 || (current.bits&24))return false;
+           current.maxPosture<=0 || current.posture<=0 || (current.bits&24))return false;
         int target=damageHp(current.posture,current.maxPosture,amount/20.,0);
+        BridgeVitalWrite write;
         reinterpret_cast<SetPosture>(base_+0xbd6710)(current.data,target,0);return true;
     }
     void release(){

@@ -70,7 +70,7 @@ int main(){int n{};auto check=[&](bool b,const char*s){++n;if(!b)throw std::runt
     fixtureActor=ptr(npc);fixtureData=ptr(npcData);
     stub(0xa4a050,reinterpret_cast<uintptr_t>(fixtureLookup));stub(0xbd64e0,reinterpret_cast<uintptr_t>(fixtureHp));
     stub(0xbd6710,reinterpret_cast<uintptr_t>(fixturePosture));
-    combat.tick(8,true);combat.observe(ptr(npcPhysics));Sleep(51);combat.tick(8,true);
+    combat.tick(8,true);combat.observe(ptr(npcPhysics));Sleep(80);combat.tick(8,true);
     check(memory.combatState.read(state) && state.count==1 && state.actors[0].posture==200 &&
           state.actors[0].bossNode==2 && (state.actors[0].flags&4),"boss counters and native NoDeath exported");
     p={};p.tick=GetTickCount64();p.epoch=8;p.hero=state.hero;p.session=9;p.command=1;
@@ -79,7 +79,15 @@ int main(){int n{};auto check=[&](bool b,const char*s){++n;if(!b)throw std::runt
           fixturePostureCalls==1,"production dispatch uses HP and posture setters, preserves boss NoDeath");
     combat.tick(8,true);check(fixturePostureCalls==1,"acknowledged command never replays posture damage");
     check(*reinterpret_cast<int*>(npcData.data()+0x25c)==2,"combat never edits boss phase/node counter");
-    npcData[0x228]|=16;p.tick=GetTickCount64();p.command=2;p.commands[1]={2,state.actors[0].id,1,0};
+    put(npcData,0x148,int(-20));Sleep(80);combat.tick(8,true);memory.combatState.read(state);
+    check(state.actors[0].posture==0 && state.actors[0].maxPosture==200 && state.actors[0].bossNode==2,
+        "native negative posture publishes a full gauge and retains boss node");
+    p.tick=GetTickCount64();p.command=2;p.commands[1]={2,state.actors[0].id,1,0};
+    memory.combatReport.write(p);combat.tick(8,true);
+    check(fixturePostureCalls==1 && *reinterpret_cast<int*>(npcData.data()+0x148)==-20,
+        "bridge damage cannot recover an already broken posture remainder");
+    put(npcData,0x148,int(200));
+    npcData[0x228]|=16;p.tick=GetTickCount64();p.command=3;p.commands[2]={3,state.actors[0].id,1,0};
     memory.combatReport.write(p);combat.tick(8,true);check(fixturePostureCalls==1,"NoPostureConsume is respected");
     VirtualProtect(image.data()+0xbd6000,4096,hpOld,&hpOld);VirtualProtect(image.data()+0xa4a000,4096,lookupOld,&lookupOld);
     std::cout<<n<<" combat layout, validation and owned player immunity checks passed\n";

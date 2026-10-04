@@ -104,6 +104,7 @@ struct App {
     bridge::NativeMovement movement;
     bridge::NativeDriver driver;
     bridge::NativeCombatAdapter combat;
+    bridge::CombatTrace combatTrace;
     bridge::Compositor compositor;
     bridge::LatestFrame latest;
     std::shared_ptr<bridge::Frame> renderFrame;
@@ -963,6 +964,9 @@ DWORD WINAPI scBootstrap(void *) {
             sc::log("Hook installation failed.");
             return 0;
         }
+        if(GetPrivateProfileIntW(L"SekiroBridge",L"combat_trace",0,config.c_str()))
+            sc::log(app->combatTrace.install(app->host.base(),app->combat.postureReady(),sc::dataRoot)
+                    ? "Combat trace hooks installed." : "Combat trace unavailable; original combat retained.");
         sc::log(sc::input::install() ? "DirectInput capture installed." : "DirectInput capture unavailable.");
         auto user = GetModuleHandleW(L"user32.dll");
         for (auto item : std::array<std::tuple<const char *, void *, void **>, 2>{
