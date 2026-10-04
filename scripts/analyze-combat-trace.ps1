@@ -13,6 +13,29 @@ for($traceIndex=0;$traceIndex -lt $traceLines.Count;$traceIndex++){
  if($traceEvent.kind){$traceEvents+=$traceEvent}
 }
 $traceChanges=@($traceEvents | Where-Object {$_.after.hp -ne $_.before.hp -or $_.after.posture -ne $_.before.posture -or $_.after.bossNode -ne $_.before.bossNode})
+$traceNativeHits=@($traceEvents|Where-Object {$_.kind -eq 'native-hit-entry'})
+$tracePhaseChanges=@();$tracePending=@{}
+foreach($traceEvent in $traceEvents){
+ $traceKey='{0}:{1}' -f $traceEvent.thread,$traceEvent.data
+ if($traceEvent.kind -eq 'native-hit-entry'){
+  $traceType=$null
+  if($traceEvent.hitBytes -and $traceEvent.hitBytes.Length -ge 88){
+   $traceTypeBytes=[byte[]]::new(4)
+   for($traceByte=0;$traceByte -lt 4;$traceByte++){$traceTypeBytes[$traceByte]=[Convert]::ToByte($traceEvent.hitBytes.Substring(80+2*$traceByte,2),16)}
+   $traceType=[BitConverter]::ToInt32($traceTypeBytes,0)
+  }
+  if($traceType -eq 5 -and $traceEvent.before.bossNode -gt 0){$tracePending[$traceKey]=$traceEvent}
+ }elseif($tracePending.ContainsKey($traceKey)){
+  $traceHit=$tracePending[$traceKey]
+  $traceAge=[long]$traceEvent.tick-[long]$traceHit.tick
+  if($traceAge -lt 0 -or $traceAge -gt 64 -or $traceHit.before.maxHp -ne $traceEvent.before.maxHp){$tracePending.Remove($traceKey)}
+  elseif($traceHit.before.bossNode-1 -eq $traceEvent.before.bossNode){
+   $tracePhaseChanges+=@{hitId=$traceHit.hitId;tick=$traceEvent.tick;thread=$traceEvent.thread;
+     source=$traceHit.source;bossNodeBefore=$traceHit.before.bossNode;bossNodeAfter=$traceEvent.before.bossNode}
+   $tracePending.Remove($traceKey)
+  }
+ }
+}
 $traceCandidates=@($traceChanges | Group-Object kind,source,@{Expression={if($_.stackRva.Count){$_.stackRva[0]}else{'unknown'}}} | ForEach-Object {
  $traceFirst=$_.Group[0]
  @{kind=$traceFirst.kind;source=$traceFirst.source;firstCallerRva=$traceFirst.stackRva[0];count=$_.Count;
@@ -25,5 +48,6 @@ $traceReport=@{trace=$TracePath;records=$traceEvents.Count;effectiveChanges=$tra
  nativeHpInjuries=@($traceChanges|Where-Object {$_.source -eq 'native' -and $_.after.hp -lt $_.before.hp}).Count;
  nativePostureLosses=@($traceChanges|Where-Object {$_.source -eq 'native' -and $_.after.posture -lt $_.before.posture}).Count;
  bossNodeTransitions=@($traceChanges|Where-Object {$_.before.bossNode -ne $_.after.bossNode}).Count;
+ nativeHitEntries=$traceNativeHits.Count;correlatedBossPhaseChanges=$tracePhaseChanges;
  nativeDamageAbiVerified=$false;nativeDeathblowAbiVerified=$false}
 $traceReport|ConvertTo-Json -Depth 8

@@ -22,10 +22,14 @@ foreach($source in @('buffer','hook','trampoline','hde\hde64')){
 & $cpp @common '-shared' '-I' "$JdkRoot\include" '-I' "$JdkRoot\include\win32" "$projectRoot\bridge\jni.cpp" '-o' "$buildRoot\sekirobridge-jni.dll"
 if($LASTEXITCODE){throw 'JNI build failed'}
 $imgui=@('imgui.cpp','imgui_draw.cpp','imgui_tables.cpp','imgui_widgets.cpp','backends\imgui_impl_dx11.cpp','backends\imgui_impl_win32.cpp')|ForEach-Object{Join-Path "$DependencyRoot\imgui" $_}
-& $cpp @common '-shared' "$projectRoot\src\proxy.cpp" "$projectRoot\src\host_mod.cpp" "$projectRoot\src\movement_hook.cpp" "$projectRoot\src\movement_stub.S" "$projectRoot\src\combat_trace.cpp" "$projectRoot\src\combat_trace_stub.S" "$projectRoot\src\dinput8.def" @imgui @objects '-ld3d11' '-ldxgi' '-ld3dcompiler' '-lbcrypt' '-luser32' '-lgdi32' '-limm32' '-ldwmapi' '-ldxguid' '-o' "$packageRoot\dinput8.dll"
+& $cpp @common '-shared' "$projectRoot\src\proxy.cpp" "$projectRoot\src\host_mod.cpp" "$projectRoot\src\movement_hook.cpp" "$projectRoot\src\movement_stub.S" "$projectRoot\src\combat_trace.cpp" "$projectRoot\src\combat_trace_stub.S" "$projectRoot\src\combat_game_hook.cpp" "$projectRoot\src\combat_game_stub.S" "$projectRoot\src\dinput8.def" @imgui @objects '-ld3d11' '-ldxgi' '-ld3dcompiler' '-lbcrypt' '-luser32' '-lgdi32' '-limm32' '-ldwmapi' '-ldxguid' '-o' "$packageRoot\dinput8.dll"
 if($LASTEXITCODE){throw 'Host DLL build failed'}
 Copy-Item -LiteralPath "$projectRoot\config\sekirobridge.ini" -Destination "$packageRoot\sekirobridge.ini" -Force
 if(!$SkipTests){
+    & $cpp @common '-DSC_TRACE_FIXTURE_ENTRY=scCombatGameEntry' "$projectRoot\tests\native_hit_tests.cpp" "$projectRoot\tests\combat_trace_fixture.S" "$projectRoot\src\combat_game_hook.cpp" "$projectRoot\src\combat_game_stub.S" @objects '-lbcrypt' '-o' "$buildRoot\native_hit_tests.exe"
+    if($LASTEXITCODE){throw 'Native hit fixture build failed'}
+    & "$buildRoot\native_hit_tests.exe"
+    if($LASTEXITCODE){throw 'Native hit checks failed'}
     & $cpp @common "$projectRoot\tests\combat_trace_tests.cpp" "$projectRoot\tests\combat_trace_fixture.S" "$projectRoot\src\combat_trace.cpp" "$projectRoot\src\combat_trace_stub.S" @objects '-lbcrypt' '-o' "$buildRoot\combat_trace_tests.exe"
     if($LASTEXITCODE){throw 'Combat trace fixture build failed'}
     & "$buildRoot\combat_trace_tests.exe"

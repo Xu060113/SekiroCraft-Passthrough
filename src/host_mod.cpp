@@ -10,6 +10,7 @@
 #include "input_capture.hpp"
 #include "hotkey.hpp"
 #include "movement_hook.hpp"
+#include "combat_game_hook.hpp"
 #include <atomic>
 #include <thread>
 #include <set>
@@ -105,6 +106,7 @@ struct App {
     bridge::NativeDriver driver;
     bridge::NativeCombatAdapter combat;
     bridge::CombatTrace combatTrace;
+    bridge::CombatGameHook combatGameHook;
     bridge::Compositor compositor;
     bridge::LatestFrame latest;
     std::shared_ptr<bridge::Frame> renderFrame;
@@ -327,6 +329,9 @@ struct App {
                     " world="+(worldReason.empty()?"ok":worldReason)+
                     " hud="+(overlayReason.empty()?"ok":overlayReason));
             sc::log("combatReady="+std::to_string(combat.ready())+" postureReady="+std::to_string(combat.postureReady())+
+                    " nativeHits="+std::to_string(combat.nativeHits())+" nativeDispatch="+std::to_string(combat.nativeDispatched.load())+
+                    " gameCombatTicks="+std::to_string(combat.gameThreadCalls.load())+
+                    " nativeHitFailure="+std::to_string(combat.nativeHitFailure())+
                     " postureHits="+std::to_string(combat.appliedPosture.load())+" actors="+std::to_string(combat.publishedActors.load())+
                     " hits="+std::to_string(combat.applied.load())+" rejected="+std::to_string(combat.rejected.load()));
         }
@@ -363,12 +368,14 @@ struct App {
             (unsigned long long)sc::input::mouseData.load());
         ImGui::Text("Combat adapter=%s | actors=%llu | applied/rejected hits=%llu/%llu",combat.ready()?"ready":"unavailable",
             (unsigned long long)combat.publishedActors.load(),(unsigned long long)combat.applied.load(),(unsigned long long)combat.rejected.load());
+        ImGui::Text("Experimental native hits: %s | dispatched=%llu",combat.nativeHits()?"on":"off",
+            (unsigned long long)combat.nativeDispatched.load());
         ImGui::Checkbox("Hide native hero when MC frame is valid", &hideOriginal);
         ImGui::Checkbox("Host uses reversed Z", &reverseDepth);
         ImGui::TextWrapped("%s", status.c_str());
         ImGui::TextWrapped("%s", compositor.error.c_str());
         ImGui::TextWrapped(
-            "Local NPC block constraints and HP/posture combat are experimental. Native deathblows, complete hit reactions and Havok bodies remain unavailable.");
+            "Native normal hits require live acceptance. Boss deathblow action handoff and Havok block bodies remain unavailable.");
         ImGui::End();
     }
 };
@@ -967,6 +974,10 @@ DWORD WINAPI scBootstrap(void *) {
         if(GetPrivateProfileIntW(L"SekiroBridge",L"combat_trace",0,config.c_str()))
             sc::log(app->combatTrace.install(app->host.base(),app->combat.postureReady(),sc::dataRoot)
                     ? "Combat trace hooks installed." : "Combat trace unavailable; original combat retained.");
+        if(GetPrivateProfileIntW(L"SekiroBridge",L"native_hits",0,config.c_str()))
+            sc::log(app->combatGameHook.install(app->host.base(),app->combat)
+                    ? "Experimental native normal-hit dispatch installed on AttackManager update."
+                    : "Native hit dispatch signatures unavailable; compatibility combat retained.");
         sc::log(sc::input::install() ? "DirectInput capture installed." : "DirectInput capture unavailable.");
         auto user = GetModuleHandleW(L"user32.dll");
         for (auto item : std::array<std::tuple<const char *, void *, void **>, 2>{

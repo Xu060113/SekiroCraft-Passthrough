@@ -2,12 +2,12 @@
 #include "sekirocraft/host.hpp"
 #include "../bridge/shared_memory.hpp"
 #include "combat_trace.hpp"
+#include "native_hit.hpp"
 #include <atomic>
 #include <mutex>
 namespace bridge {
-// All HP changes occur in the existing verified physics callback. There is no
-// pointer sweep, remote thread, or assumed ApplyDamage ABI. The engine HP setter
-// clamps to max HP and preserves native NoDeath semantics (boss deathblows).
+// Compatibility HP/posture writes use the verified physics callback. Opt-in
+// native hits drain only in the separately fingerprinted AttackManager update.
 class NativeCombatAdapter {
     struct Actor {uintptr_t chr{},data{},physics{};uint32_t handle{};uint64_t id{},seen{};};
     struct Vital {uintptr_t chr{},data{};uint32_t handle{};int32_t hp{},maxHp{},posture{},maxPosture{},bossNode{};uint8_t bits{};sc::Vec3 position{};uint8_t team{};};
@@ -17,6 +17,9 @@ class NativeCombatAdapter {
     uintptr_t hero_{},heroData_{}; uint32_t heroHandle_{};
     double damage_{},heal_{};
     CombatReport report_{};
+    NativeHitBackend nativeHit_;
+    std::atomic<bool> nativeHits_{};
+    uint64_t controlAt_{};bool combatActive_{};
     uintptr_t ownedHero_{},ownedData_{};uint32_t ownedHandle_{};uint8_t oldNoDamage_{};bool owned_{};
     using Lookup=uintptr_t(*)(uintptr_t,uint32_t);
     using SetHp=void(*)(uintptr_t,int32_t);
@@ -38,9 +41,11 @@ class NativeCombatAdapter {
            v.maxPosture>0 && v.maxPosture<=10000000 && v.posture>=-100 && v.posture<=v.maxPosture){
             // The engine permits a negative remainder while posture is broken.
             // Publish a full gauge without discarding its maximum or phase data.
-            v.posture=std::max(0,v.posture);sc::readMemory(v.data+0x25c,v.bossNode);
+            v.posture=std::max(0,v.posture);
         }
         else v.posture=v.maxPosture=0;
+        int32_t nodes{};
+        if(postureReady_ && sc::readMemory(v.data+0x25c,nodes) && nodes>=0 && nodes<=32)v.bossNode=nodes;
         return v.maxHp>0 && v.maxHp<=10000000 && v.hp>=0 && v.hp<=v.maxHp;
     }
     bool resolves(uintptr_t chr,uint32_t handle)const {
@@ -54,6 +59,28 @@ class NativeCombatAdapter {
            current.handle!=v.handle || current.hp!=v.hp || current.maxHp!=v.maxHp)return false;
         BridgeVitalWrite write;
         reinterpret_cast<SetHp>(base_+0xbd64e0)(v.data,std::clamp(hp,0,v.maxHp));return true;}
+    void commands(const Vital &player,bool native){
+        auto first=report_.command>damageSlots?report_.command-damageSlots:0;
+        ackCommand_=std::max(ackCommand_,first);
+        for(auto seq=ackCommand_+1;seq<=report_.command;++seq){const auto &cmd=report_.commands[(seq-1)%damageSlots];
+            bool success=false;
+            for(auto &a:actors_)if(a.id==cmd.actor && a.chr && resolves(a.chr,a.handle)){
+                Vital v;if(read(a.chr,v) && v.data==a.data && v.handle==a.handle &&
+                   sc::length(v.position-player.position)<32 && v.hp>0 && !(v.bits&8)){
+                    if(native)success=nativeHit_.dispatch(player.chr,v.chr,player.position,v.position,v.maxHp,v.maxPosture,cmd.amount);
+                    else {
+                        auto target=damageHp(v.hp,v.maxHp,cmd.amount/20.,0);
+                        // A Boss can retain native nodes without NoDeath bit 4.
+                        // Compatibility damage must not bypass its finisher.
+                        if(v.bossNode>0)target=std::max(1,target);
+                        success=setHp(v,target);
+                        if(success && postureDamage(v,cmd.amount))appliedPosture.fetch_add(1);
+                    }
+                }break;}
+            (success?applied:rejected).fetch_add(1);ackCommand_=seq;
+            if(native && success)nativeDispatched.fetch_add(1);
+        }
+    }
     bool postureDamage(const Vital &v,float amount){Vital current;
         if(!postureReady_ || !resolves(v.chr,v.handle) || !read(v.chr,current) ||
            current.data!=v.data || current.handle!=v.handle || current.hp==0 ||
@@ -80,6 +107,7 @@ class NativeCombatAdapter {
   public:
     std::atomic<uint64_t> observed{},applied{},rejected{},publishedActors{};
     std::atomic<uint64_t> appliedPosture{};
+    std::atomic<uint64_t> nativeDispatched{},gameThreadCalls{};
     void initialize(uintptr_t base,SharedMemory &memory){base_=base;memory_=&memory;
         ready_=base && code(0xbd64e0,std::array<uint8_t,16>{0x48,0x89,0x5c,0x24,0x18,0x89,0x54,0x24,0x10,0x57,0x48,0x83,0xec,0x20,0x8b,0xb9}) &&
             code(0xa4a050,std::array<uint8_t,16>{0x48,0x83,0xec,0x28,0xe8,0x37,0xff,0xff,0xff,0x48,0x85,0xc0,0x74,0x08,0x48,0x8b});
@@ -88,6 +116,21 @@ class NativeCombatAdapter {
         sc::log("Native HP / posture signatures="+std::to_string(ready_)+"/"+std::to_string(postureReady_));}
     bool ready()const{return ready_;}
     bool postureReady()const{return postureReady_;}
+    bool prepareNativeHits(){return ready_ && nativeHit_.initialize(base_);}
+    void enableNativeHits(bool on){nativeHits_.store(on,std::memory_order_release);}
+    bool nativeHits()const{return nativeHits_.load(std::memory_order_acquire);}
+    uint32_t nativeHitFailure()const{return nativeHit_.lastFailure();}
+    void gameTick(uintptr_t manager,float dt)noexcept {
+        if(!nativeHits() || !std::isfinite(dt) || dt<=0 || dt>.25f)return;
+        uintptr_t actual{};if(!sc::readMemory(base_+0x3d77ef0,actual) || actual!=manager || !actual)return;
+        gameThreadCalls.fetch_add(1);
+        std::unique_lock lock(mutex_,std::try_to_lock);if(!lock)return;
+        auto now=GetTickCount64();Vital player;
+        if(!combatActive_ || !fresh(now,controlAt_) || report_.epoch!=epoch_ || report_.hero!=heroId_ ||
+           report_.session!=session_ || !fresh(now,report_.tick) || !read(hero(),player) || player.hp<=0 ||
+           player.chr!=hero_ || player.data!=heroData_ || player.handle!=heroHandle_)return;
+        commands(player,true);
+    }
     // Present may request a release; zero-wait locking never stalls rendering.
     void releaseIfInactive(bool on){if(on)return;std::unique_lock lock(mutex_,std::try_to_lock);if(lock)release();}
     void observe(uintptr_t physics)noexcept{
@@ -107,6 +150,7 @@ class NativeCombatAdapter {
     void tick(uint64_t epoch,bool active)noexcept {
         if(!ready_)return;std::unique_lock lock(mutex_,std::try_to_lock);if(!lock)return;
         auto now=GetTickCount64();Vital player;
+        controlAt_=now;combatActive_=active;
         if(epoch_!=epoch){release();epoch_=epoch;hero_=0;actors_={};session_=ackCommand_=0;damage_=heal_=0;}
         if(!read(hero(),player)){release();return;}
         if(hero_!=player.chr || heroData_!=player.data || heroHandle_!=player.handle){release();
@@ -121,18 +165,7 @@ class NativeCombatAdapter {
                 auto target=damageHp(player.hp,player.maxHp,report_.invulnerable?0:report_.damage-damage_,report_.heal-heal_);
                 if(target==player.hp || setHp(player,target)){damage_=report_.damage;heal_=report_.heal;read(hero_,player);}
             }
-            auto first=report_.command>damageSlots?report_.command-damageSlots:0;
-            ackCommand_=std::max(ackCommand_,first);
-            for(auto seq=ackCommand_+1;seq<=report_.command;++seq){const auto &cmd=report_.commands[(seq-1)%damageSlots];
-                bool success=false;
-                for(auto &a:actors_)if(a.id==cmd.actor && a.chr && resolves(a.chr,a.handle)){
-                    Vital v;if(read(a.chr,v) && v.data==a.data && v.handle==a.handle &&
-                       sc::length(v.position-player.position)<32 && v.hp>0 && !(v.bits&8)){
-                        success=setHp(v,damageHp(v.hp,v.maxHp,cmd.amount/20.,0));
-                        if(success && postureDamage(v,cmd.amount))appliedPosture.fetch_add(1);
-                    }break;}
-                (success?applied:rejected).fetch_add(1);ackCommand_=seq;
-            }
+            if(!nativeHits())commands(player,false);
         }
         if(now-publishAt_<50)return;publishAt_=now;
         CombatState out;out.sequence=++sequence_;out.tick=now;out.epoch=epoch;out.hero=heroId_;

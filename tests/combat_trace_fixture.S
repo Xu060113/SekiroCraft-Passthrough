@@ -1,4 +1,7 @@
 .text
+#ifndef SC_TRACE_FIXTURE_ENTRY
+#define SC_TRACE_FIXTURE_ENTRY scCombatHitTraceEntry
+#endif
 .globl scTraceFixture
 .seh_proc scTraceFixture
 scTraceFixture:
@@ -24,11 +27,13 @@ scTraceFixture:
     movups scTraceVector(%rip), %xmm3
     movups scTraceVector(%rip), %xmm4
     movups scTraceVector(%rip), %xmm5
-    callq scCombatHitTraceEntry
+    callq SC_TRACE_FIXTURE_ENTRY
     addq $40, %rsp
     retq
 .seh_endproc
 .globl scTraceClobber
+.globl scTraceGameClobber
+.set scTraceGameClobber, scTraceClobber
 scTraceClobber:
     xorq %rax, %rax
     xorq %rcx, %rcx

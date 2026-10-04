@@ -70,7 +70,7 @@ class CombatTrace {
     static void hitCallback(uintptr_t context,uintptr_t attack,uintptr_t hit,uintptr_t mode)noexcept{
         auto *self=instance_;if(!self || !self->enabled_.load(std::memory_order_relaxed))return;
         Event e{};e.kind=3;e.tick=GetTickCount64();e.thread=GetCurrentThreadId();
-        e.hitId=++self->hitSequence_;e.args={context,attack,hit,mode};
+        e.hitId=++self->hitSequence_;e.args={context,attack,hit,mode};e.bridge=bridgeVitalWriteDepth!=0;
         uintptr_t chr{},modules{},data{},vt{};
         if(sc::readMemory(context+8,chr) && sc::readMemory(chr,vt) && vt>=self->base_ && vt<self->base_+70066176 &&
            sc::readMemory(chr+0x1ff8,modules) && sc::readMemory(modules+0x18,data) && read(data,e.before))e.data=data;

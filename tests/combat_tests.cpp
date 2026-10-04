@@ -89,6 +89,14 @@ int main(){int n{};auto check=[&](bool b,const char*s){++n;if(!b)throw std::runt
     put(npcData,0x148,int(200));
     npcData[0x228]|=16;p.tick=GetTickCount64();p.command=3;p.commands[2]={3,state.actors[0].id,1,0};
     memory.combatReport.write(p);combat.tick(8,true);check(fixturePostureCalls==1,"NoPostureConsume is respected");
+    npcData[0x228]=0;put(npcData,0x130,int(1000));
+    p.tick=GetTickCount64();p.command=4;p.commands[3]={4,state.actors[0].id,40,0};
+    memory.combatReport.write(p);combat.tick(8,true);
+    check(*reinterpret_cast<int*>(npcData.data()+0x130)==1 && *reinterpret_cast<int*>(npcData.data()+0x25c)==2,
+        "compatibility damage preserves a Boss node without native NoDeath bit");
+    put(npcData,0x14c,int(0));put(npcData,0x148,int(0));Sleep(80);combat.tick(8,true);memory.combatState.read(state);
+    check(state.actors[0].bossNode==2 && state.actors[0].maxPosture==0,
+        "Boss node protection does not depend on posture availability");
     VirtualProtect(image.data()+0xbd6000,4096,hpOld,&hpOld);VirtualProtect(image.data()+0xa4a000,4096,lookupOld,&lookupOld);
     std::cout<<n<<" combat layout, validation and owned player immunity checks passed\n";
 }

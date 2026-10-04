@@ -65,6 +65,8 @@ int main(){int n{};auto check=[&](bool ok,const char *s){++n;if(!ok)throw std::r
     check(nativeHit(reinterpret_cast<uintptr_t>(context.data()),reinterpret_cast<uintptr_t>(attack.data()),
                     reinterpret_cast<uintptr_t>(hit.data()),0x12345)==777 && hitCalls==1 && hit[0]==0xcd,
         "real hit detour tail-calls original once with original arguments and result");
+    {bridge::BridgeVitalWrite write;nativeHit(reinterpret_cast<uintptr_t>(context.data()),
+        reinterpret_cast<uintptr_t>(attack.data()),reinterpret_cast<uintptr_t>(hit.data()),0x12345);}
     std::ofstream(root/L"combat-trace.stop").close();
     std::string content;
     for(int i=0;i<30;++i){Sleep(50);for(auto &entry:std::filesystem::directory_iterator(root))
@@ -78,6 +80,8 @@ int main(){int n{};auto check=[&](bool ok,const char *s){++n;if(!ok)throw std::r
     check(content.find("\"target\":-20")!=std::string::npos,"broken-posture transition is recorded");
     check(content.find("\"kind\":\"native-hit-entry\"")!=std::string::npos &&
         content.find("\"hitBytes\":\"ab00")!=std::string::npos,"native hit input captured before original mutation");
+    check(content.find("\"kind\":\"native-hit-entry\",\"source\":\"bridge\"")!=std::string::npos && hitCalls==2,
+        "native-hit bridge scope records dispatch without replaying the call");
     MH_Uninitialize();VirtualFree(image,0,MEM_RELEASE);std::filesystem::remove_all(root);
     std::cout<<n<<" production combat trace detour checks passed\n";
 }
