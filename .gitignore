@@ -1,0 +1,17 @@
+.tools/
+.research/
+third_party/
+build/
+dist/
+runtime/minecraft-textures/
+*.log
+*.scw
+*.scw.tmp
+*.scw.bak
+branches/
+.cache/
+.gradle/
+mc/.gradle/
+mc/build/
+runtime/
+mc/run/

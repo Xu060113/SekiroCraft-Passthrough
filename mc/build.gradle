@@ -1,0 +1,33 @@
+plugins { id 'fabric-loom' version '1.6.12' }
+version = project.mod_version
+group = 'dev.sekirobridge'
+base { archivesName = 'sekiro-minecraft-passthrough' }
+repositories { maven { url = 'https://maven-central.storage-download.googleapis.com/maven2/' } }
+// Loom also adds Maven Central itself; this environment's Java egress is blocked
+// there. The Google mirror serves the same Central artifacts over verified TLS.
+repositories.configureEach { repository ->
+    if (repository instanceof MavenArtifactRepository && repository.url.host in ['repo.maven.apache.org','repo1.maven.org']) {
+        repository.url = uri('https://maven-central.storage-download.googleapis.com/maven2/')
+    }
+}
+dependencies {
+    minecraft 'com.mojang:minecraft:1.20.1'
+    mappings 'net.fabricmc:yarn:1.20.1+build.10:v2'
+    modImplementation 'net.fabricmc:fabric-loader:0.16.10'
+    modImplementation 'net.fabricmc.fabric-api:fabric-api:0.92.2+1.20.1'
+}
+tasks.withType(JavaCompile).configureEach { options.release = 17 }
+java { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+processResources {
+    inputs.property 'version', project.version
+    filesMatching('fabric.mod.json') { expand 'version': project.version }
+}
+// Built by scripts/build-passthrough.ps1; no Minecraft or other game assets are bundled.
+tasks.named('processResources') {
+    from('../build/passthrough-native') { include 'sekirobridge-jni.dll'; into 'native/windows-x64' }
+}
+tasks.register('protocolTest', JavaExec) {
+    dependsOn compileJava
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'dev.sekirobridge.ProtocolSelfTest'
+}

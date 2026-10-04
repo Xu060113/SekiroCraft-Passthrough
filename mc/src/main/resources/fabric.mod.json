@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "sekirobridge",
+  "version": "${version}",
+  "name": "Sekiro Minecraft Passthrough",
+  "description": "Local dual-process bridge for a dedicated Minecraft world and Sekiro.",
+  "authors": ["SekiroCraft"],
+  "environment": "client",
+  "entrypoints": { "client": ["dev.sekirobridge.BridgeClient"] },
+  "mixins": ["sekirobridge.mixins.json"],
+  "depends": { "fabricloader": ">=0.16.10", "minecraft": "1.20.1", "java": ">=17", "fabric-api": "*" }
+}

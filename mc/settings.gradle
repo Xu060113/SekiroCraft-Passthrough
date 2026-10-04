@@ -1,0 +1,4 @@
+pluginManagement {
+    repositories { maven { url = 'https://maven.fabricmc.net/' }; maven { url = 'https://maven-central.storage-download.googleapis.com/maven2/' } }
+}
+rootProject.name = 'sekiro-minecraft-passthrough'
