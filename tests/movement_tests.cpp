@@ -84,6 +84,42 @@ int main() {
         auto corner=bridge::guiPosition(480,330,1920,1200,16.f/9);
         check(std::abs(corner[0]-.25f)<.0001f && std::abs(corner[1]-.25f)<.0001f,
             "GUI clicks respect vertical letterbox margins");
+        for(auto messages : {std::array<UINT,4>{WM_LBUTTONDOWN,WM_LBUTTONUP,WM_LBUTTONDBLCLK,WM_LBUTTONUP},
+                std::array<UINT,4>{WM_RBUTTONDOWN,WM_RBUTTONUP,WM_RBUTTONDBLCLK,WM_RBUTTONUP},
+                std::array<UINT,4>{WM_MBUTTONDOWN,WM_MBUTTONUP,WM_MBUTTONDBLCLK,WM_MBUTTONUP}}){
+            unsigned presses{},releases{};uint32_t button{},action{};
+            for(auto message:messages){check(bridge::mouseButtonEvent(message,button,action),"record each Windows click edge");
+                if(action)++presses;else ++releases;}
+            check(presses==2 && releases==2,"a Windows double click remains two complete clicks");
+        }
+        check(bridge::terrainCellCenter(.01f)==bridge::terrainCellCenter(.49f) &&
+              bridge::terrainCellCenter(-.01f)==bridge::terrainCellCenter(-.49f),
+              "slope samples stay at fixed world cells while the player moves");
+        check(bridge::terrainCellCenter(-.51f)==-.75f && bridge::terrainCellCenter(.51f)==.75f,
+              "negative terrain coordinates use floor instead of truncation");
+        bridge::CameraFrames cameraFrames;
+        auto completed=std::make_shared<bridge::Frame>();
+        auto &meta=completed->meta;meta.sequence=1;meta.epoch=7;meta.tickMs=meta.controlTickMs=1000;
+        meta.width=meta.height=1;meta.eye[1]=1.62f;meta.forward[2]=1;
+        meta.fovY=1.1f;meta.aspect=16.f/9;meta.nearZ=.05f;meta.farZ=500;
+        cameraFrames.receive(completed);
+        auto selected=cameraFrames.select(7,1010);
+        check(selected==completed,"native camera selects an already completed image");
+        cameraFrames.applied(selected);
+        std::shared_ptr<bridge::Frame> displayed;
+        cameraFrames.takeDisplayed(displayed);
+        auto newer=std::make_shared<bridge::Frame>(*completed);newer->meta.sequence=2;newer->meta.eye[1]+=1;
+        cameraFrames.receive(newer);cameraFrames.takeDisplayed(displayed);
+        check(displayed==completed,"a new jump image cannot replace the rendered native scene image");
+        selected=cameraFrames.select(7,1020);
+        check(selected==newer && displayed==completed,"selecting a new camera does not publish before native writes succeed");
+        cameraFrames.applied(selected);cameraFrames.takeDisplayed(displayed);
+        check(displayed==newer,"native scene and MC image advance together after applying the camera");
+        auto recordedPose=bridge::frameCameraPose(newer->meta);
+        check(recordedPose.at(3,1)==newer->meta.eye[1],"completed image owns the displayed jump camera height");
+        check(!cameraFrames.select(8,1020) && !cameraFrames.select(7,1400),"stale and previous-scene images cannot drive camera");
+        cameraFrames.applied({});cameraFrames.takeDisplayed(displayed);
+        check(!displayed,"failed camera update explicitly clears paired image");
         MH_DisableHook(MH_ALL_HOOKS); MH_Uninitialize();
         std::cout << "PASS " << checks << " player draw, collision shapes, mailbox and real x64 movement detour checks\n";
         return 0;

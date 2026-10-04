@@ -164,6 +164,10 @@ public final class FrameExporter implements AutoCloseable {
             current.fence = GL32.glFenceSync(GL32.GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
             GL11.glFlush();
             current = null;
+            // Publishing only at the next world pass adds a whole render frame
+            // even when this readback has already completed. This is still a
+            // zero-timeout fence poll; slow GPU work never stalls the client.
+            poll();
         }
     }
     public void discard() {

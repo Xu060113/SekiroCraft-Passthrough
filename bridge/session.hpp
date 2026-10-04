@@ -7,6 +7,18 @@
 namespace bridge {
 constexpr uint32_t mcOwnerCapability = 256, terrainCapability = 512;
 constexpr size_t inputSlots = 128, terrainSide = 9;
+inline float terrainCellCenter(float value) { return std::floor(value * 2) * .5f + .25f; }
+inline bool mouseButtonEvent(UINT message, uint32_t &button, uint32_t &action) {
+    switch (message) {
+    case WM_LBUTTONDOWN: case WM_LBUTTONDBLCLK: button=0;action=1;return true;
+    case WM_LBUTTONUP: button=0;action=0;return true;
+    case WM_RBUTTONDOWN: case WM_RBUTTONDBLCLK: button=1;action=1;return true;
+    case WM_RBUTTONUP: button=1;action=0;return true;
+    case WM_MBUTTONDOWN: case WM_MBUTTONDBLCLK: button=2;action=1;return true;
+    case WM_MBUTTONUP: button=2;action=0;return true;
+    default: return false;
+    }
+}
 inline std::array<float,2> guiPosition(float x,float y,float width,float height,float aspect) {
     if(width<=0 || height<=0 || !std::isfinite(aspect) || aspect<=0)return {};
     float sw=std::min(width,height*aspect),sh=sw/aspect;
@@ -66,6 +78,13 @@ inline sc::Mat4 playerCameraPose(const PlayerPacket &p) {
     pose.at(2,0)=forward.x;pose.at(2,1)=forward.y;pose.at(2,2)=forward.z;
     pose.at(3,0)=p.eye.x;pose.at(3,1)=p.eye.y;pose.at(3,2)=p.eye.z;pose.at(3,3)=1;
     return pose;
+}
+inline sc::Mat4 frameCameraPose(const FrameMeta &m) {
+    PlayerPacket camera;
+    std::memcpy(&camera.eye,m.eye,12);std::memcpy(&camera.forward,m.forward,12);
+    camera.yaw=(m.flags & ExplicitYaw) ? std::bit_cast<float>(m.reserved) :
+        std::atan2(-m.forward[0],-m.forward[2])*180/3.14159265358979323846f;
+    return playerCameraPose(camera);
 }
 inline bool validInput(const InputPacket &p) {
     if (!p.tick || !p.epoch) return false;

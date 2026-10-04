@@ -12,9 +12,41 @@ public final class InputForwarder {
     public static int replayMods=-1;
     private final int[] pressed=new int[256];
     private final ByteBuffer events=Protocol.direct(4136);
+    private final Target target;
     private int buttons;
-    private long epoch,eventSequence,dx,dy,textSequence;
-    private boolean initialized;
+    private long epoch,eventSequence,dx,dy,textSequence,pointerEventTick;
+    private boolean initialized,inputEnabled;
+    // The target keeps replay ordering independent from the GLFW window and lets
+    // the same production replay code be exercised without launching either game.
+    interface Target {
+        boolean screenOpen();
+        void cursor(float x,float y);
+        void key(int key,int action,int mods);
+        void button(int button,int action,int mods);
+        void scroll(double amount);
+        void motion(long x,long y);
+        void character(int codepoint,int mods);
+        void level(int key,boolean held);
+    }
+    private static final class MinecraftTarget implements Target {
+        private MinecraftClient client(){return MinecraftClient.getInstance();}
+        public boolean screenOpen(){return client().currentScreen!=null;}
+        public void cursor(float x,float y){var c=client();
+            ((InputInvoker)c.mouse).bridgeCursor(c.getWindow().getHandle(),
+                Math.max(0,Math.min(1,x))*c.getWindow().getWidth(),Math.max(0,Math.min(1,y))*c.getWindow().getHeight());}
+        public void key(int key,int action,int mods){var c=client();
+            ((KeyboardInvoker)c.keyboard).bridgeKey(c.getWindow().getHandle(),key,0,action,mods);}
+        public void button(int button,int action,int mods){var c=client();
+            ((InputInvoker)c.mouse).bridgeButton(c.getWindow().getHandle(),button,action,mods);}
+        public void scroll(double amount){var c=client();((InputInvoker)c.mouse).bridgeScroll(c.getWindow().getHandle(),0,amount);}
+        public void motion(long x,long y){var c=client();
+            ((InputInvoker)c.mouse).bridgeCursor(c.getWindow().getHandle(),c.mouse.getX()+x,c.mouse.getY()+y);}
+        public void character(int codepoint,int mods){var c=client();
+            ((KeyboardInvoker)c.keyboard).bridgeChar(c.getWindow().getHandle(),codepoint,mods);}
+        public void level(int key,boolean held){KeyBinding.setKeyPressed(InputUtil.Type.KEYSYM.createFromCode(key),held);}
+    }
+    InputForwarder(){this(new MinecraftTarget());}
+    InputForwarder(Target target){this.target=target;}
     boolean held(int key){for(int vk:pressed)if(vk!=0 && vk==key)return true;return false;}
     static int glfwKey(int vk) {
         if(vk>=48 && vk<=57 || vk>=65 && vk<=90)return vk;
@@ -38,33 +70,40 @@ public final class InputForwarder {
             case 222 -> GLFW.GLFW_KEY_APOSTROPHE; default -> GLFW.GLFW_KEY_UNKNOWN;
         };
     }
-    private void cursor(float x,float y){var c=MinecraftClient.getInstance();
-        ((InputInvoker)c.mouse).bridgeCursor(c.getWindow().getHandle(),
-            Math.max(0,Math.min(1,x))*c.getWindow().getWidth(),Math.max(0,Math.min(1,y))*c.getWindow().getHeight());}
+    private static boolean forwardedKey(int vk){return vk>=8 && vk<256 && !(vk>=118 && vk<=120) && !(vk>=160 && vk<=165);}
     private void key(int vk,int action,int mods){
-        if(vk<8 || vk>=256 || vk>=118 && vk<=120 || vk>=160 && vk<=165)return;
+        if(!forwardedKey(vk))return;
         int key=glfwKey(vk);if(key==GLFW.GLFW_KEY_UNKNOWN)return;
-        var c=MinecraftClient.getInstance();
         if(action==0){if(pressed[vk]==0)return;key=pressed[vk];pressed[vk]=0;}
         else if(action==1){if(pressed[vk]!=0)return;pressed[vk]=key;}
-        else if(pressed[vk]==0)return;
-        ((KeyboardInvoker)c.keyboard).bridgeKey(c.getWindow().getHandle(),key,0,action,mods);
+        else if(action==2)pressed[vk]=key; // A repeat can recover a DOWN lost during focus/overflow.
+        else return;
+        target.key(key,action,mods);
     }
     private void button(int code,int action,int mods){
         int bit=1<<code;if(((buttons&bit)!=0)==(action!=0))return;
         buttons=action!=0?buttons|bit:buttons&~bit;
-        var c=MinecraftClient.getInstance();
-        ((InputInvoker)c.mouse).bridgeButton(c.getWindow().getHandle(),code,action,mods);
+        target.button(code,action,mods);
     }
     void update(Protocol.State s){
-        var c=MinecraftClient.getInstance();
-        if(!NativeBridge.input(BridgeClient.handle(),events) || events.getLong(8)!=s.epoch() ||
-            !Protocol.fresh(NativeBridge.clockMs(),events.getLong(0)))return;
+        if(NativeBridge.input(BridgeClient.handle(),events))update(s,events,NativeBridge.clockMs());
+    }
+    void update(Protocol.State s,ByteBuffer events,long now){
+        long tick=events.getLong(0);
+        if(events.getLong(8)!=s.epoch() || !Protocol.fresh(now,tick))return;
         long next=events.getLong(16),nx=events.getLong(24),ny=events.getLong(32);
         if(!initialized || epoch!=s.epoch()){
-            release();initialized=true;epoch=s.epoch();eventSequence=next;dx=nx;dy=ny;textSequence=s.textSequence();}
+            release();initialized=true;epoch=s.epoch();eventSequence=next;dx=nx;dy=ny;textSequence=s.textSequence();pointerEventTick=0;}
         boolean input=(s.flags()&Protocol.EDIT)!=0 && (s.flags()&Protocol.MENU)==0;
         try{replaying=true;
+            if(!input)releaseHeld();
+            else if(!inputEnabled){
+                // Restore held movement/modifier levels after focus or F8. Do not
+                // turn a sampled button/key level into a second click/action.
+                for(int vk=8;vk<256;++vk)if(forwardedKey(vk) && s.key(vk)){
+                    int key=glfwKey(vk);if(key!=GLFW.GLFW_KEY_UNKNOWN)pressed[vk]=key;}
+            }
+            inputEnabled=input;
             long first=Math.max(eventSequence,next-128);
             if(next-eventSequence>128)releaseHeld();
             for(long i=first;i<next;++i){
@@ -72,30 +111,36 @@ public final class InputForwarder {
                 int mods=events.getInt(at+12);replayMods=mods;
                 if(!input)continue;
                 if(kind==1)key(code,action,mods);
-                else if(kind==2){if(c.currentScreen!=null)cursor(events.getFloat(at+16),events.getFloat(at+20));button(code,action,mods);}
-                else if(kind==3){if(c.currentScreen!=null)cursor(events.getFloat(at+16),events.getFloat(at+20));
-                    ((InputInvoker)c.mouse).bridgeScroll(c.getWindow().getHandle(),0,events.getInt(at+24)/120.0);}
+                else if(kind==2){pointerEventTick=tick;
+                    if(target.screenOpen())target.cursor(events.getFloat(at+16),events.getFloat(at+20));button(code,action,mods);}
+                else if(kind==3){pointerEventTick=tick;
+                    if(target.screenOpen())target.cursor(events.getFloat(at+16),events.getFloat(at+20));
+                    target.scroll(events.getInt(at+24)/120.0);}
             }
             eventSequence=next;replayMods=-1;
-            int mods=(s.key(16)?1:0)|(s.key(17)?2:0)|(s.key(18)?4:0);
-            for(int vk=8;vk<256;++vk)key(vk,input && s.key(vk)?1:0,mods);
-            if(c.currentScreen==null)
+            int mods=(pressed[16]!=0?1:0)|(pressed[17]!=0?2:0)|(pressed[18]!=0?4:0);
+            // Control and the event ring use separate IPC locks. An older Control
+            // snapshot must never undo newer edges, and sampled DOWN must never
+            // replay a click that was already fully consumed from the event ring.
+            if(s.tickMs()>tick){
+                for(int vk=8;vk<256;++vk)if(!s.key(vk))key(vk,0,mods);
+                for(int b=0;b<3;++b)if((s.buttons()&(1<<b))==0)button(b,0,mods);
+            }
+            if(!target.screenOpen())
                 for(int vk=8;vk<256;++vk){int key=glfwKey(vk);
-                    if(key!=GLFW.GLFW_KEY_UNKNOWN && !(vk>=160 && vk<=165) && !(vk>=118 && vk<=120))
-                        KeyBinding.setKeyPressed(InputUtil.Type.KEYSYM.createFromCode(key),pressed[vk]!=0);}
-            for(int b=0;b<3;++b)button(b,input && (s.buttons()&(1<<b))!=0?1:0,mods);
-            if(input && c.currentScreen!=null)cursor(s.mouseX(),s.mouseY());
+                    if(key!=GLFW.GLFW_KEY_UNKNOWN && forwardedKey(vk))target.level(key,pressed[vk]!=0);}
+            if(input && target.screenOpen() && s.tickMs()>=tick && s.tickMs()>pointerEventTick)
+                target.cursor(s.mouseX(),s.mouseY());
             long mx=nx-dx,my=ny-dy;dx=nx;dy=ny;
-            if(input && c.currentScreen==null && Math.abs(mx)<5000 && Math.abs(my)<5000)
-                ((InputInvoker)c.mouse).bridgeCursor(c.getWindow().getHandle(),c.mouse.getX()+mx,c.mouse.getY()+my);
+            if(input && !target.screenOpen() && Math.abs(mx)<5000 && Math.abs(my)<5000)target.motion(mx,my);
             if(s.textSequence()>=textSequence)
                 for(long i=Math.max(textSequence,s.textSequence()-8);i<s.textSequence();++i)
-                    if(input && c.currentScreen!=null){int cp=s.text()[(int)(i%8)];
-                        if(Character.isValidCodePoint(cp))((KeyboardInvoker)c.keyboard).bridgeChar(c.getWindow().getHandle(),cp,mods);}
+                    if(input && target.screenOpen()){int cp=s.text()[(int)(i%8)];
+                        if(Character.isValidCodePoint(cp))target.character(cp,mods);}
             textSequence=s.textSequence();
         }finally{replaying=false;replayMods=-1;}
     }
     private void releaseHeld(){for(int vk=8;vk<256;++vk)key(vk,0,0);for(int i=0;i<3;++i)button(i,0,0);}
     void release(){if(!initialized)return;
-        try{replaying=true;releaseHeld();}finally{replaying=false;replayMods=-1;}initialized=false;}
+        try{replaying=true;releaseHeld();}finally{replaying=false;replayMods=-1;}initialized=false;inputEnabled=false;}
 }

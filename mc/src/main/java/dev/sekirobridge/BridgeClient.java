@@ -45,11 +45,13 @@ public final class BridgeClient implements ClientModInitializer {
     public static boolean keyHeld(int key){return INPUT.held(key);}
     public static boolean armed() { return armed && handle != 0; }
     public static boolean active() {
-        return connected() && (state.flags()&Protocol.FOCUS)!=0;
+        return connected() && Protocol.fresh(NativeBridge.clockMs(),state.tickMs()) &&
+            (state.flags()&Protocol.FOCUS)!=0;
     }
     public static boolean connected(){
         return handle != 0 && armed && state != null && state.valid() &&
-            Protocol.fresh(NativeBridge.clockMs(),state.tickMs()) && (state.flags()&Protocol.SCENE)!=0 &&
+            NativeBridge.clockMs()>=state.tickMs() && NativeBridge.clockMs()-state.tickMs()<=1500 &&
+            (state.flags()&Protocol.SCENE)!=0 &&
             (state.capabilities()&256)!=0 && MinecraftClient.getInstance().player!=null &&
             MinecraftClient.getInstance().world != null && MinecraftClient.getInstance().getServer() != null;
     }
@@ -161,7 +163,8 @@ public final class BridgeClient implements ClientModInitializer {
                         .then(literal("status").executes(ctx -> {
                             ctx.getSource().sendFeedback(
                                 Text.literal("JNI=" + (handle != 0) + " armed=" + armed +
-                                             " active=" + active() + " frames=" + FRAMES.published));
+                                             " active=" + active() + " terrainReady=" + NativeTerrain.ready() +
+                                             " frames=" + FRAMES.published));
                             return Command.SINGLE_SUCCESS;
                         }))));
         ClientTickEvents.START_CLIENT_TICK.register(c -> {

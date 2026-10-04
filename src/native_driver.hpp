@@ -2,6 +2,7 @@
 #include "MinHook.h"
 #include "sekirocraft/host.hpp"
 #include "../bridge/shared_memory.hpp"
+#include "../bridge/camera_frames.hpp"
 #include <mutex>
 #include <atomic>
 extern "C" void scCameraEntry();
@@ -14,6 +15,9 @@ class NativeDriver {
     std::mutex mutex_;
     Control control_{};
     PlayerPacket player_{};
+    CameraFrames cameraFrames_;
+    std::atomic<bool> cameraEnabled_{};
+    std::atomic<uint64_t> cameraEpoch_{}, controlTick_{};
     bool enabled_{}, installed_{}, rayReady_{};
     uint64_t retry_{}, terrainTick_{}, terrainSequence_{};
     static inline NativeDriver *instance_{};
@@ -26,12 +30,13 @@ class NativeDriver {
             fresh(now,player_.tick,150) && fresh(now,player_.controlTick) &&
             sc::length(player_.position-sc::Vec3{control_.player[0],control_.player[1],control_.player[2]})<5;
     }
-    void terrain(uint64_t now,sc::Vec3 center) {
-        if(!rayReady_ || now-terrainTick_<75)return;
+    void terrain(uint64_t now,uint64_t epoch,sc::Vec3 center) {
+        if(!rayReady_ || now-terrainTick_<50)return;
         terrainTick_=now;
         uintptr_t manager{},world{};
         if(!sc::readMemory(base_+0x3d6d640,manager) || !sc::readMemory(manager+0x98,world) || world<65536)return;
-        TerrainPacket p; p.sequence=++terrainSequence_; p.tick=now; p.epoch=control_.epoch;p.center=center;
+        center.x=terrainCellCenter(center.x);center.z=terrainCellCenter(center.z);
+        TerrainPacket p; p.sequence=++terrainSequence_; p.tick=now; p.epoch=epoch;p.center=center;
         auto cast=reinterpret_cast<CastRay>(base_+0x94cc50);
         // SekiroTool identifies this routine; the loaded 1.06 disassembly confirms
         // stack arg 5 is the aligned world hit position (the engine's caller at
@@ -53,7 +58,7 @@ class NativeDriver {
         }
     }
   public:
-    std::atomic<uint64_t> cameraCalls{},controlledMoves{};
+    std::atomic<uint64_t> cameraCalls{},controlledMoves{},cameraFrameSequence{};
     std::atomic<uint64_t> terrainSamples{},terrainHits{};
     void initialize(uintptr_t base,SharedMemory &memory){base_=base;memory_=&memory;instance_=this;
         scCameraHandler=cameraCallback;}
@@ -73,29 +78,45 @@ class NativeDriver {
         if(!installed_)MH_RemoveHook(target);
         sc::log("MC native camera / terrain adapter="+std::to_string(ready()));
     }
+    void receiveFrame(std::shared_ptr<Frame> frame){cameraFrames_.receive(std::move(frame));}
+    void takeCameraFrame(std::shared_ptr<Frame> &frame){cameraFrames_.takeDisplayed(frame);}
     void update(const Control &c,bool enabled){std::unique_lock lock(mutex_,std::try_to_lock);
-        if(lock){control_=c;enabled_=enabled && ready();}}
+        if(lock){control_=c;enabled_=enabled && ready();
+            cameraEpoch_=c.epoch;controlTick_=c.tickMs;cameraEnabled_=enabled_;}}
     bool target(sc::Vec3 &position) {
         std::unique_lock lock(mutex_,std::try_to_lock);if(!lock)return false;
         auto now=GetTickCount64();
         if(!enabled_ || !fresh(now,control_.tickMs))return false;
         bool have=current(now);
-        terrain(now,have?player_.position:sc::Vec3{control_.player[0],control_.player[1],control_.player[2]});
-        if(!have)return false;
-        position=player_.position;controlledMoves.fetch_add(1);return true;
+        auto center=have?player_.position:sc::Vec3{control_.player[0],control_.player[1],control_.player[2]};
+        auto epoch=control_.epoch;
+        if(have)position=player_.position;
+        // Ray work cannot hold the state mutex and make a camera/control update
+        // miss its zero-wait lock and fall back to the native wolf camera.
+        lock.unlock();
+        terrain(now,epoch,center);
+        if(have)controlledMoves.fetch_add(1);
+        return have;
     }
     void camera(uintptr_t camera) noexcept {
-        std::unique_lock lock(mutex_,std::try_to_lock);if(!lock || !current(GetTickCount64()))return;
         uintptr_t field{},currentCamera{};
         if(!sc::readMemory(base_+0x3d5c0a0,field) || !sc::readMemory(field+0x30,currentCamera) || camera!=currentCamera)return;
-        auto pose=playerCameraPose(player_);
-        std::array<float,4> lens{player_.fov,player_.aspect,player_.nearZ,player_.farZ};
+        auto now=GetTickCount64();
+        auto frame=cameraFrames_.select(cameraEpoch_.load(),now);
+        if(!cameraEnabled_ || !fresh(now,controlTick_) || !frame){cameraFrames_.applied({});return;}
+        const auto &m=frame->meta;
+        auto pose=frameCameraPose(m);
+        std::array<float,4> lens{m.fovY,m.aspect,m.nearZ,m.farZ};
         SIZE_T wrote{};
         if(WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(camera+0x10),&pose,sizeof(pose),&wrote) &&
            wrote==sizeof(pose)){
-            WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(camera+0x50),&lens,sizeof(lens),&wrote);
-            cameraCalls.fetch_add(1);
+            if(WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(camera+0x50),&lens,sizeof(lens),&wrote) && wrote==sizeof(lens)){
+                cameraCalls.fetch_add(1);cameraFrameSequence=m.sequence;
+                cameraFrames_.applied(std::move(frame));
+                return;
+            }
         }
+        cameraFrames_.applied({});
         // The normal update rewrites this camera next tick when disabled. No
         // globally frozen camera instructions or NPC transforms are changed.
     }

@@ -8,6 +8,8 @@ $buildRoot=Join-Path $projectRoot 'build\passthrough-native'
 if($LASTEXITCODE){throw 'Native control fixture failed'}
 & java '-cp' "$projectRoot\mc\build\classes\java\main" 'dev.sekirobridge.ProtocolSelfTest' "$buildRoot\sekirobridge-jni.dll" "$buildRoot\control-fixture.bin" "$buildRoot\java-frame-meta.bin"
 if($LASTEXITCODE){throw 'Java/JNI protocol test failed'}
+& java '-cp' "$projectRoot\mc\build\classes\java\main" 'dev.sekirobridge.InputForwarderSelfTest'
+if($LASTEXITCODE){throw 'Production input replay regression failed'}
 & javac '-cp' "$projectRoot\mc\build\classes\java\main" '-d' $buildRoot "$projectRoot\tests\JniPeer.java"
 if($LASTEXITCODE){throw 'Java peer fixture build failed'}
 & "$CompilerRoot\x86_64-w64-mingw32-clang++.exe" '-std=c++20' '-O2' '-static' '-municode' "$projectRoot\tests\jni_host.cpp" '-o' "$buildRoot\jni_host.exe"

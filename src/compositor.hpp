@@ -113,6 +113,33 @@ class Compositor {
   public:
     std::string error;
     uint64_t submitted{};
+    // A frame-driven native camera must use the same pose and projection as the
+    // completed MC image. Reprojecting an older image cannot advance animated
+    // entities, and translation exposes pixels that the old depth map never saw.
+    static bool matchesCamera(const FrameMeta &frame, const sc::Camera &camera) {
+        if (!valid(frame) || !camera.valid)
+            return false;
+        sc::Vec3 eye{frame.eye[0], frame.eye[1], frame.eye[2]};
+        sc::Vec3 forward{frame.forward[0], frame.forward[1], frame.forward[2]};
+        float projectionY = 1 / std::tan(frame.fovY / 2);
+        float projectionX = projectionY / frame.aspect;
+        sc::Vec3 right = sc::normalize(sc::Vec3{forward.z, 0, -forward.x});
+        if (frame.flags & ExplicitYaw) {
+            float yaw = std::bit_cast<float>(frame.reserved) * 3.14159265358979323846f / 180;
+            right = {-std::cos(yaw), 0, std::sin(yaw)};
+        }
+        auto pose = sc::inverse(camera.view);
+        if (!pose || sc::dot(right, {pose->at(0, 0), pose->at(0, 1), pose->at(0, 2)}) < .9999995f)
+            return false;
+        auto closeProjection = [](float a, float b) {
+            return std::isfinite(a) && std::isfinite(b) &&
+                   std::abs(a - b) <= std::max(1.f, std::abs(a)) * .0002f;
+        };
+        return sc::length(camera.eye - eye) <= .0005f &&
+               sc::dot(camera.forward, forward) >= .9999995f &&
+               closeProjection(projectionX, camera.projection.at(0, 0)) &&
+               closeProjection(projectionY, camera.projection.at(1, 1));
+    }
     static constexpr const char *shader = R"(
 cbuffer Bridge : register(b0) {
     float4 CaptureEye, CaptureForward, CaptureRight, CaptureUp;
@@ -248,6 +275,10 @@ float4 overlay(Out i):SV_TARGET{return World.SampleLevel(Point,frameUV(i.uv),0);
               const sc::Camera &camera, float width, float height, bool reproject = true) {
         if (!source || !sequence_ || !camera.valid)
             return false;
+        if (!reproject && !matchesCamera(frameMeta_, camera)) {
+            error = "Completed MC image does not match the native scene camera";
+            return false;
+        }
         ComPtr<ID3D11Resource> resource;
         source->GetResource(&resource);
         ComPtr<ID3D11Texture2D> texture;

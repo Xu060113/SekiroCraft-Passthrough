@@ -31,3 +31,9 @@ tasks.register('protocolTest', JavaExec) {
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'dev.sekirobridge.ProtocolSelfTest'
 }
+// Exercise vanilla voxel collision without the development launcher or a window.
+tasks.register('terrainTest', JavaExec) {
+    dependsOn compileJava
+    classpath = sourceSets.main.output + sourceSets.main.compileClasspath
+    mainClass = 'dev.sekirobridge.TerrainSelfTest'
+}

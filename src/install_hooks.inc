@@ -59,7 +59,21 @@ bool installHooks() {
             {44,
              {reinterpret_cast<void *>(hookViewports<0>), reinterpret_cast<void *>(hookViewports<1>)},
              {reinterpret_cast<void **>(&originalViewports[0]),
-              reinterpret_cast<void **>(&originalViewports[1])}}};
+              reinterpret_cast<void **>(&originalViewports[1])}},
+            // ID3D11DeviceContext slots from the Windows d3d11.h interface:
+            // ExecuteCommandList=58, FinishCommandList=114.
+            {53,
+             {reinterpret_cast<void *>(hookClearDepth<0>), reinterpret_cast<void *>(hookClearDepth<1>)},
+             {reinterpret_cast<void **>(&originalClearDepth[0]),
+              reinterpret_cast<void **>(&originalClearDepth[1])}},
+            {58,
+             {reinterpret_cast<void *>(hookExecuteCommands<0>), reinterpret_cast<void *>(hookExecuteCommands<1>)},
+             {reinterpret_cast<void **>(&originalExecuteCommands[0]),
+              reinterpret_cast<void **>(&originalExecuteCommands[1])}},
+            {114,
+             {reinterpret_cast<void *>(hookFinishCommands<0>), reinterpret_cast<void *>(hookFinishCommands<1>)},
+             {reinterpret_cast<void **>(&originalFinishCommands[0]),
+              reinterpret_cast<void **>(&originalFinishCommands[1])}}};
         for (auto &m : methods) {
             if (!ok)
                 break;
