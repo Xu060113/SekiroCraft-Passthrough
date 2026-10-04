@@ -24,5 +24,13 @@ try {
 $gameJar=Get-ChildItem -LiteralPath "$projectRoot\mc\.gradle\loom-cache\minecraftMaven" -Recurse -File -Filter '*.jar'|Where-Object { $_.Name -like 'minecraft-merged*' -and $_.Name -notlike '*sources*' }|Select-Object -First 1
 $asmJars=@(Get-ChildItem -LiteralPath "$projectRoot\.cache\gradle-home\caches\modules-2\files-2.1\org.ow2.asm" -Recurse -File -Filter '*.jar'|Where-Object Name -NotLike '*sources*'|Select-Object -ExpandProperty FullName)
 if(!$gameJar -or !$asmJars.Count){throw 'Mapped game or ASM dependency missing; run the MC build first'}
-& java '-cp' ($asmJars -join ';') "$projectRoot\tests\MixinTargets.java" $gameJar.FullName "$projectRoot\mc\build\classes\java\main\dev\sekirobridge\mixin"
+$gsonJar=Get-ChildItem -LiteralPath "$projectRoot\.cache\gradle-home\caches\modules-2\files-2.1\com.google.code.gson\gson" -Recurse -File -Filter '*.jar'|Where-Object Name -NotLike '*sources*'|Select-Object -First 1
+if(!$gsonJar){throw 'Gson dependency missing'}
+$verificationClasspath=(@($asmJars)+@($gsonJar.FullName)) -join ';'
+& java '-cp' $verificationClasspath "$projectRoot\tests\MixinTargets.java" $gameJar.FullName "$projectRoot\mc\build\classes\java\main\dev\sekirobridge\mixin"
 if($LASTEXITCODE){throw 'Minecraft injection target verification failed'}
+$productionGame=Get-ChildItem -LiteralPath "$projectRoot\.cache\gradle-home\caches\fabric-loom\minecraftMaven\net\minecraft\minecraft-merged-intermediary" -Recurse -File -Filter '*.jar'|Select-Object -First 1
+$productionMod=Join-Path $projectRoot 'mc\build\libs\sekiro-minecraft-passthrough-0.1.0.jar'
+if(!$productionGame -or !(Test-Path -LiteralPath $productionMod)){throw 'Production game or remapped mod missing'}
+& java '-cp' $verificationClasspath "$projectRoot\tests\MixinTargets.java" $productionGame.FullName $productionMod
+if($LASTEXITCODE){throw 'Production Minecraft injection target verification failed'}
