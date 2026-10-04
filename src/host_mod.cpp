@@ -5,7 +5,9 @@
 #include "compositor.hpp"
 #include "sekirocraft/host.hpp"
 #include "../bridge/shared_memory.hpp"
+#include "../bridge/latest_frame.hpp"
 #include "input_capture.hpp"
+#include "hotkey.hpp"
 #include <atomic>
 #include <thread>
 #include <set>
@@ -38,26 +40,6 @@ struct Flag {
     Flag() { inMod = true; }
     ~Flag() { inMod = previous; }
 };
-class LatestFrame {
-    std::mutex mutex;
-    std::shared_ptr<bridge::Frame> value;
-
-  public:
-    std::shared_ptr<bridge::Frame> load() {
-        std::unique_lock lock(mutex, std::try_to_lock);
-        return lock.owns_lock() ? value : nullptr;
-    }
-    void store(std::shared_ptr<bridge::Frame> next) {
-        std::shared_ptr<bridge::Frame> old;
-        {
-            std::unique_lock lock(mutex, std::try_to_lock);
-            if (!lock.owns_lock())
-                return;
-            old.swap(value);
-            value.swap(next);
-        }
-    }
-};
 std::atomic<int32_t> pendingWheel{};
 std::atomic<uint64_t> textSequence{};
 std::array<std::atomic<uint32_t>, 8> text{};
@@ -76,9 +58,11 @@ struct App {
     sc::GameHost host;
     bridge::SharedMemory memory;
     bridge::Compositor compositor;
-    LatestFrame latest;
+    bridge::LatestFrame latest;
+    std::shared_ptr<bridge::Frame> renderFrame;
     std::atomic<uint64_t> epoch{};
     std::atomic<uint32_t> mcStatus{};
+    std::atomic<uint64_t> statusBusy{}, skippedPresents{};
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext> context;
     ComPtr<ID3D11RenderTargetView> target;
@@ -102,7 +86,7 @@ struct App {
     sc::Camera camera;
     bool initialized{}, nativeCamera = true, showMenu{}, edit{}, reverseDepth = true, hideOriginal = true,
                         guiOwned{};
-    bool keys[256]{};
+    std::array<bridge::KeyEdge, 256> keys;
     int cursorAdjustment{};
     RECT previousClip{};
     bridge::Control control;
@@ -128,9 +112,9 @@ struct App {
     }
     bool pressed(int vk) {
         bool down = (GetAsyncKeyState(vk) & 0x8000) != 0;
-        bool edge = (down && !keys[vk]) || pendingKeys[vk].exchange(false);
-        keys[vk] = down;
-        return edge;
+        // Always drain the message edge, even when the physical edge is true.
+        bool notified = pendingKeys[vk].exchange(false);
+        return keys[vk].update(down, notified);
     }
     void update() {
         bool focused = GetForegroundWindow() == window;
@@ -203,12 +187,14 @@ struct App {
         memory.writeControl(control);
         if (!scene || !focused || showMenu) {
             latest.store(nullptr);
+            renderFrame.reset();
             host.avatarVisibility(false);
         }
         if (GetTickCount64() - lastPeerLog > 5000) {
             lastPeerLog = GetTickCount64();
-            sc::log("scene=" + std::to_string(scene) + " mc=" + std::to_string(mcStatus.load()) +
-                    " frames=" + std::to_string(compositor.submitted));
+            sc::log("scene=" + std::to_string(scene) + " mc=" + std::to_string(mcStatus.load()) + " frames=" +
+                    std::to_string(compositor.submitted) + " peerBusy=" + std::to_string(statusBusy.load()) +
+                    " presentBusy=" + std::to_string(skippedPresents.load()));
         }
     }
     void hud() {
@@ -221,6 +207,8 @@ struct App {
         ImGui::Text("MC: %s | composite frames: %llu",
                     mcStatus.load() & 1 ? "armed and connected" : "waiting (run /sekirobridge on)",
                     (unsigned long long)compositor.submitted);
+        ImGui::Text("IPC busy retries: %llu | skipped presents: %llu", (unsigned long long)statusBusy.load(),
+                    (unsigned long long)skippedPresents.load());
         ImGui::Checkbox("Forward MC actions (F8)", &edit);
         ImGui::Checkbox("Hide native hero when MC frame is valid", &hideOriginal);
         ImGui::Checkbox("Host uses reversed Z", &reverseDepth);
@@ -425,8 +413,10 @@ HRESULT STDMETHODCALLTYPE hookPresent(IDXGISwapChain *swap, UINT interval, UINT 
     if (inMod || !ready || flags & DXGI_PRESENT_TEST)
         return originalPresent(swap, interval, flags);
     std::unique_lock guard(appMutex, std::try_to_lock);
-    if (!guard.owns_lock())
+    if (!guard.owns_lock()) {
+        app->skippedPresents.fetch_add(1);
         return originalPresent(swap, interval, flags);
+    }
     Flag flag;
     auto forward = [&] {
         guard.unlock();
@@ -452,7 +442,8 @@ HRESULT STDMETHODCALLTYPE hookPresent(IDXGISwapChain *swap, UINT interval, UINT 
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
         a.update();
-        auto f = a.latest.load();
+        a.latest.take(a.renderFrame);
+        const auto &f = a.renderFrame;
         bool submitted = false;
         if (f && f->meta.epoch == a.epoch && bridge::fresh(GetTickCount64(), f->meta.tickMs) &&
             bridge::fresh(GetTickCount64(), f->meta.controlTickMs) &&
@@ -512,6 +503,7 @@ HRESULT STDMETHODCALLTYPE hookResize(IDXGISwapChain *swap, UINT count, UINT widt
         a.bindings.clear();
         a.depthScores.clear();
         a.latest.store(nullptr);
+        a.renderFrame.reset();
         a.camera.valid = false;
         ImGui_ImplDX11_InvalidateDeviceObjects();
     }
@@ -578,6 +570,7 @@ DWORD WINAPI scBootstrap(void *) {
         }
         std::thread([] {
             uint64_t previous{};
+            bridge::PeerStatus peer;
             for (;;) {
                 try {
                     auto f = app->memory.readFrame(previous, app->epoch);
@@ -585,7 +578,11 @@ DWORD WINAPI scBootstrap(void *) {
                         previous = f->meta.sequence;
                         app->latest.store(std::move(f));
                     }
-                    app->mcStatus = app->memory.readStatus(app->epoch);
+                    // A zero-wait lock miss is not a disconnect. Cached heartbeats
+                    // still expire, and a successfully read explicit off clears immediately.
+                    if (!app->memory.readStatus(peer))
+                        app->statusBusy.fetch_add(1);
+                    app->mcStatus = peer.flagsFor(app->epoch, GetTickCount64());
                 } catch (...) {
                     app->mcStatus = 0;
                     app->latest.store(nullptr);

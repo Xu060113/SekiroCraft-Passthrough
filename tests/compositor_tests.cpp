@@ -119,6 +119,22 @@ int main() {
     auto pixel = read();
     require(pixel[1] >= 126 && pixel[1] <= 130 && pixel[2] >= 125 && pixel[2] <= 130,
             "premultiplied overlay blends once above scene");
+    auto empty = f;
+    ++empty.meta.sequence;
+    std::fill(empty.pixels.begin(), empty.pixels.end(), 0);
+    for (int i = 0; i < 32 * 32; ++i) {
+        float farDepth = 1;
+        std::memcpy(empty.pixels.data() + plane + i * 4, &farDepth, 4);
+    }
+    require(renderer.upload(c.Get(), empty), "upload transparent void world and HUD");
+    c->ClearRenderTargetView(target.Get(), blue);
+    require(renderer.draw(c.Get(), target.Get(), dsv.Get(), camera, 32, 32),
+            "composite a transparent MC background");
+    pixel = read();
+    require(pixel[0] < 5 && pixel[1] < 5 && pixel[2] > 250,
+            "empty MC background preserves the native image instead of blacking it out");
+    f.meta.sequence = empty.meta.sequence + 1;
+    require(renderer.upload(c.Get(), f), "restore nonempty HUD fixture");
     camera.eye.x = 3;
     require(!renderer.draw(c.Get(), target.Get(), dsv.Get(), camera, 32, 32),
             "camera discontinuity drops frame");

@@ -1,4 +1,6 @@
 #include "../bridge/shared_memory.hpp"
+#include "../bridge/latest_frame.hpp"
+#include "../src/hotkey.hpp"
 #include <iostream>
 #include <thread>
 #include <atomic>
@@ -74,6 +76,9 @@ int main(int argc, char **argv) {
     require(!host.readFrame(1, c.epoch) && !host.readFrame(0, 456), "duplicate and stale epoch ignored");
     require(mc.status(3, c.epoch) && host.readStatus(c.epoch) == 3 && host.readStatus(456) == 0,
             "peer status tied to epoch");
+    bridge::PeerStatus peer;
+    require(host.readStatus(peer) && peer.flagsFor(c.epoch, GetTickCount64()) == 3,
+            "cache a valid peer heartbeat");
     for (int i = 0; i < 8; ++i) {
         c.tickMs = GetTickCount64();
         require(host.writeControl(c), "refresh heartbeat");
@@ -95,10 +100,16 @@ int main(int argc, char **argv) {
         Sleep(1);
     auto before = GetTickCount64();
     require(!host.writeControl(c) && !host.readFrame(0, c.epoch), "busy peer skips work");
+    require(!host.readStatus(peer) && peer.flagsFor(c.epoch, peer.tickMs) == 3,
+            "busy IPC preserves the cached connection instead of flashing the host");
+    require(peer.flagsFor(c.epoch, peer.tickMs + 351) == 0 && peer.flagsFor(456, peer.tickMs) == 0,
+            "cached connection still expires and cannot cross a session");
     require(GetTickCount64() - before < 100, "render-side IPC never waits");
     release = true;
     holder.join();
     CloseHandle(gate);
+    require(mc.status(0, c.epoch) && host.readStatus(peer) && peer.flagsFor(c.epoch, GetTickCount64()) == 0,
+            "explicit bridge off clears the cached connection immediately");
     c.epoch = 456;
     c.tickMs = GetTickCount64();
     require(host.writeControl(c), "new session");
@@ -131,6 +142,48 @@ int main(int argc, char **argv) {
     }
     producer.join();
     require(observed > 0, "concurrent publisher and receiver exercised");
+    bridge::LatestFrame mailbox;
+    auto first = std::make_shared<bridge::Frame>();
+    first->meta.sequence = 1;
+    std::shared_ptr<bridge::Frame> displayed;
+    mailbox.store(first);
+    require(mailbox.take(displayed) && displayed == first, "receive an atomic frame snapshot");
+    require(!mailbox.take(displayed) && displayed == first, "an empty mailbox retains the last frame");
+    mailbox.store(nullptr);
+    require(mailbox.take(displayed) && !displayed, "explicit frame reset clears the render snapshot");
+    std::atomic<bool> finished = false;
+    std::thread publisher([&] {
+        for (uint64_t i = 1; i <= 10000; ++i) {
+            auto next = std::make_shared<bridge::Frame>();
+            next->meta.sequence = i;
+            next->pixels.assign(16, uint8_t(i));
+            mailbox.store(std::move(next));
+        }
+        finished = true;
+    });
+    uint64_t lastSnapshot{};
+    bool intact = true;
+    do {
+        if (mailbox.take(displayed)) {
+            intact = intact && displayed && displayed->meta.sequence > lastSnapshot &&
+                     displayed->pixels.size() == 16 &&
+                     std::all_of(displayed->pixels.begin(), displayed->pixels.end(),
+                                 [&](uint8_t p) { return p == uint8_t(displayed->meta.sequence); });
+            lastSnapshot = displayed ? displayed->meta.sequence : 0;
+        }
+    } while (!finished);
+    publisher.join();
+    if (mailbox.take(displayed))
+        lastSnapshot = displayed->meta.sequence;
+    require(intact && lastSnapshot == 10000, "concurrent atomic handoff keeps complete ordered snapshots");
+    bridge::KeyEdge hotkey;
+    require(hotkey.update(true, true), "physical and message key edges toggle once");
+    require(!hotkey.update(true, false) && !hotkey.update(true, true),
+            "a held key and its delayed message cannot toggle back off");
+    require(!hotkey.update(false, false) && hotkey.update(true, true),
+            "releasing and pressing permits the next toggle");
+    require(!hotkey.update(false, false) && hotkey.update(false, true) && !hotkey.update(false, false),
+            "a fast message-only tap is consumed once");
     if (argc > 1) {
         c = pose();
         c.player[0] = 12.5;

@@ -21,6 +21,13 @@ struct alignas(8) Header {
 static_assert(sizeof(Header) == 248);
 constexpr size_t slotBytes = sizeof(FrameMeta) + maxFrameBytes;
 constexpr size_t mappingBytes = sizeof(Header) + slots * slotBytes;
+struct PeerStatus {
+    uint32_t flags{}, pid{};
+    uint64_t tickMs{}, epoch{};
+    uint32_t flagsFor(uint64_t hostEpoch, uint64_t now) const {
+        return epoch == hostEpoch && fresh(now, tickMs) ? flags : 0;
+    }
+};
 class TryLock {
     HANDLE mutex_{};
 
@@ -130,12 +137,17 @@ class SharedMemory {
         h.mcEpoch = epoch;
         return true;
     }
-    uint32_t readStatus(uint64_t epoch) {
+    bool readStatus(PeerStatus &out) {
         TryLock lock(mutex_);
         if (!lock || !compatible())
-            return 0;
+            return false;
         auto &h = header();
-        return h.mcEpoch == epoch && fresh(GetTickCount64(), h.mcTickMs) ? h.mcFlags : 0;
+        out = {h.mcFlags, h.mcPid, h.mcTickMs, h.mcEpoch};
+        return true;
+    }
+    uint32_t readStatus(uint64_t epoch) {
+        PeerStatus peer;
+        return readStatus(peer) ? peer.flagsFor(epoch, GetTickCount64()) : 0;
     }
     bool publish(const FrameMeta &meta, std::span<const uint8_t> pixels) {
         if (!valid(meta) || pixels.size() != frameBytes(meta))

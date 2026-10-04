@@ -2,6 +2,8 @@
 
 2026-10-04：原创仓库、0.4.0 发布包与存档副本在相邻 `SekiroCraft-Original` 中；桥接安装与原创备份由本项目 `runtime/installation.json` 记录。首次 MC 启动的 `WorldRendererMixin` 静态重载崩溃已修复，修复只涉及 MC JAR，不需要重新切换已安装的只狼 DLL。实机整合继续按下列步骤验收。
 
+随后发现的黑屏交替与 F8 重复触发修复涉及两端：正常退出 MC 与只狼后，先 `-Action Restore`，再 `-Action Install` 更新 DLL，并备份/替换 MC 桥接 JAR。完成更新后再启动游戏。新日志含 `peerBusy` 与 `presentBusy` 计数，F7 菜单可以查看它们。
+
 ## 准备两个进程
 
 1. 先正常退出只狼。解压新发行包，或进入本源码项目。运行 `scripts/switch-sekiro.ps1 -Action Install`。脚本检查只狼指纹和已有 DLL 身份，备份现有原创 DLL，再安装桥接 DLL；不启动游戏。
