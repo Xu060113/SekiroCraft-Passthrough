@@ -16,6 +16,9 @@ namespace sc::input {
 inline std::atomic<bool> capture{false};
 inline std::atomic<bool> mcEdit{false};
 inline std::atomic<bool> flying{false};
+inline std::atomic<bool> mcOwner{false};
+inline std::atomic<int64_t> mouseDx{},mouseDy{};
+inline std::atomic<uint64_t> mouseStateTick{},mouseStates{},mouseData{};
 using State = HRESULT(STDMETHODCALLTYPE *)(void *, DWORD, void *);
 using Data = HRESULT(STDMETHODCALLTYPE *)(void *, DWORD, DIDEVICEOBJECTDATA *, DWORD *, DWORD);
 inline std::array<State, 4> originalState{};
@@ -55,6 +58,12 @@ inline bool flightKey(DWORD key) {
 }
 template <int I> inline HRESULT STDMETHODCALLTYPE stateHook(void *device, DWORD size, void *out) {
     auto result = originalState[I](device, size, out);
+    if (SUCCEEDED(result) && out && deviceType(device)==DI8DEVTYPE_MOUSE &&
+        (size==sizeof(DIMOUSESTATE) || size==sizeof(DIMOUSESTATE2))) {
+        mouseStateTick=GetTickCount64();
+        if(mcOwner){auto mouse=static_cast<DIMOUSESTATE*>(out);
+            mouseDx.fetch_add(mouse->lX); mouseDy.fetch_add(mouse->lY);mouseStates.fetch_add(1);}
+    }
     // Preserve native validation and acquisition errors; classify the device itself,
     // rather than guessing from its custom data format's buffer length.
     if (SUCCEEDED(result) && out && capture.load(std::memory_order_relaxed) && keyboardOrMouse(device))
@@ -77,6 +86,17 @@ template <int I>
 inline HRESULT STDMETHODCALLTYPE dataHook(void *device, DWORD size, DIDEVICEOBJECTDATA *out, DWORD *count,
                                           DWORD flags) {
     auto result = originalData[I](device, size, out, count, flags);
+    if(SUCCEEDED(result) && out && count && size==sizeof(DIDEVICEOBJECTDATA) && mcOwner &&
+        deviceType(device)==DI8DEVTYPE_MOUSE && GetTickCount64()-mouseStateTick.load()>100){
+        // Buffered-only input users have no DIMOUSESTATE delta to sample. Do not
+        // count both streams when the game is also polling mouse state. A peek
+        // is drained by the capture branch below, so its deltas are consumed once.
+        for(DWORD i=0;i<*count;++i){
+            if(out[i].dwOfs==DIMOFS_X)mouseDx.fetch_add(LONG(out[i].dwData));
+            if(out[i].dwOfs==DIMOFS_Y)mouseDy.fetch_add(LONG(out[i].dwData));
+        }
+        mouseData.fetch_add(1);
+    }
     if (SUCCEEDED(result) && count && capture.load(std::memory_order_relaxed) && keyboardOrMouse(device)) {
         // Also drain peeked events. Otherwise menu clicks could replay after closing.
         DWORD discarded = INFINITE;

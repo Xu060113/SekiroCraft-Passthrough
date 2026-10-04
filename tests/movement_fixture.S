@@ -44,3 +44,49 @@ scTestClobber:
     movq $77, %rdx
     testq %rax, %rax
     retq
+.text
+.globl scTestCameraMove
+.globl scTestCameraStore
+scTestCameraMove:
+    pushq %rdi
+    subq $32, %rsp
+    movups %xmm6, (%rsp)
+    movq %rcx, %rdi
+    movups (%rdx), %xmm6
+    movups (%rdx), %xmm0
+    movq $1234, %r8
+    xorl %eax, %eax
+    cmpl %eax, %eax
+scTestCameraStore:
+    movaps %xmm6, 128(%rdi)
+    jne scTestCameraFailure
+    cmpq $1234, %r8
+    jne scTestCameraFailure
+    movups %xmm0, 144(%rdi)
+    movl $1, %eax
+    jmp scTestCameraEnd
+scTestCameraFailure:
+    movl $0, %eax
+scTestCameraEnd:
+    movups (%rsp), %xmm6
+    addq $32, %rsp
+    popq %rdi
+    retq
+.globl scTestCameraClobber
+scTestCameraClobber:
+    movl $0x1234, (%rcx)
+    xorps %xmm0, %xmm0
+    xorps %xmm1, %xmm1
+    xorps %xmm2, %xmm2
+    xorps %xmm3, %xmm3
+    xorps %xmm4, %xmm4
+    xorps %xmm5, %xmm5
+    movq $77, %r8
+    movq $77, %r9
+    movq $77, %r10
+    movq $77, %r11
+    movq $77, %rax
+    movq $77, %rcx
+    movq $77, %rdx
+    testq %rax, %rax
+    retq

@@ -1,5 +1,6 @@
 package dev.sekirobridge.mixin;
 import dev.sekirobridge.BridgeClient;
+import dev.sekirobridge.InputForwarder;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.util.InputUtil;
 import org.lwjgl.glfw.GLFW;
@@ -14,11 +15,13 @@ public abstract class InputUtilMixin {
         if (!BridgeClient.active() || window != MinecraftClient.getInstance().getWindow().getHandle())
             return;
         var s = BridgeClient.state();
+        int mods=InputForwarder.replayMods;
         if (key == GLFW.GLFW_KEY_LEFT_SHIFT || key == GLFW.GLFW_KEY_RIGHT_SHIFT)
-            cir.setReturnValue(MinecraftClient.getInstance().currentScreen != null ? s.key(16) : s.key(18));
+            cir.setReturnValue(mods>=0 ? (mods&1)!=0 : s.key(16));
         else if (key == GLFW.GLFW_KEY_LEFT_CONTROL || key == GLFW.GLFW_KEY_RIGHT_CONTROL)
-            cir.setReturnValue(s.key(17));
+            cir.setReturnValue(mods>=0 ? (mods&2)!=0 : s.key(17));
         else if (key == GLFW.GLFW_KEY_LEFT_ALT || key == GLFW.GLFW_KEY_RIGHT_ALT)
-            cir.setReturnValue(s.key(18));
+            cir.setReturnValue(mods>=0 ? (mods&4)!=0 : s.key(18));
+        else cir.setReturnValue(BridgeClient.keyHeld(key));
     }
 }

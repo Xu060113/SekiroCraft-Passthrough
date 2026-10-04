@@ -1,4 +1,5 @@
 #include "../src/compositor.hpp"
+#include "../bridge/session.hpp"
 #include <iostream>
 #include <fstream>
 int checks{};
@@ -144,5 +145,18 @@ int main() {
     auto bad = f;
     bad.meta.width = 0;
     require(!renderer.upload(c.Get(), bad), "bad upload is rejected");
+    auto vertical=f;
+    ++vertical.meta.sequence;vertical.meta.flags|=bridge::ExplicitYaw;
+    vertical.meta.reserved=std::bit_cast<uint32_t>(37.f);
+    vertical.meta.forward[0]=0;vertical.meta.forward[1]=1;vertical.meta.forward[2]=0;
+    bridge::PlayerPacket player;player.yaw=37;player.forward={0,1,0};
+    auto pose=bridge::playerCameraPose(player);
+    camera.view=*sc::inverse(pose);camera.eye={};camera.forward={0,1,0};
+    require(renderer.upload(c.Get(),vertical),"vertical capture carries yaw without a gimbal singularity");
+    c->ClearRenderTargetView(target.Get(),blue);
+    c->ClearDepthStencilView(dsv.Get(),D3D11_CLEAR_DEPTH,camera.projection.at(2,2)+camera.projection.at(3,2)/5,0);
+    require(renderer.draw(c.Get(),target.Get(),dsv.Get(),camera,32,32,true),"vertical reprojection shader executes");
+    pixel=read();
+    require(pixel[0]>120 && pixel[1]>120 && pixel[2]<10,"look straight up retains world geometry and HUD");
     std::cout << checks << " D3D11 composite checks passed\n";
 }

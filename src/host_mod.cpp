@@ -45,6 +45,36 @@ std::atomic<int32_t> pendingWheel{};
 std::atomic<uint64_t> textSequence{};
 std::array<std::atomic<uint32_t>, 8> text{};
 std::array<std::atomic<bool>, 256> pendingKeys{};
+std::mutex eventMutex;
+bridge::InputPacket inputQueue;
+std::atomic<float> inputAspect{16.f/9};
+std::pair<float,float> guiPoint(HWND window,int x,int y) {
+    RECT rect{};GetClientRect(window,&rect);
+    float w=float(rect.right-rect.left),h=float(rect.bottom-rect.top),aspect=inputAspect.load();
+    auto point=bridge::guiPosition(float(x),float(y),w,h,aspect);
+    return {point[0],point[1]};
+}
+void recordInput(HWND hwnd,UINT msg,WPARAM w,LPARAM l) {
+    bridge::InputEvent e;
+    e.mods=((GetKeyState(VK_SHIFT)&0x8000)?1:0)|((GetKeyState(VK_CONTROL)&0x8000)?2:0)|
+           ((GetKeyState(VK_MENU)&0x8000)?4:0);
+    if((msg==WM_KEYDOWN || msg==WM_SYSKEYDOWN || msg==WM_KEYUP || msg==WM_SYSKEYUP) && w<256) {
+        e.kind=1;e.code=uint32_t(w);e.action=(msg==WM_KEYUP || msg==WM_SYSKEYUP)?0:((l&(1LL<<30))?2:1);
+    } else {
+        for(auto [down,up,button]:{std::tuple{WM_LBUTTONDOWN,WM_LBUTTONUP,0u},
+                std::tuple{WM_RBUTTONDOWN,WM_RBUTTONUP,1u},std::tuple{WM_MBUTTONDOWN,WM_MBUTTONUP,2u}})
+            if(msg==UINT(down) || msg==UINT(up)){
+                e.kind=2;e.code=button;e.action=msg==UINT(down)?1:0;
+                auto p=guiPoint(hwnd,short(LOWORD(l)),short(HIWORD(l)));e.x=p.first;e.y=p.second;
+            }
+        if(msg==WM_MOUSEWHEEL){e.kind=3;e.amount=GET_WHEEL_DELTA_WPARAM(w);
+            POINT point{short(LOWORD(l)),short(HIWORD(l))};ScreenToClient(hwnd,&point);
+            auto p=guiPoint(hwnd,point.x,point.y);e.x=p.first;e.y=p.second;}
+    }
+    if(!e.kind)return;
+    std::lock_guard lock(eventMutex);
+    inputQueue.events[inputQueue.sequence%bridge::inputSlots]=e;++inputQueue.sequence;
+}
 using WarpCursor = BOOL(WINAPI *)(int, int);
 using Clip = BOOL(WINAPI *)(const RECT *);
 WarpCursor originalWarp{};
@@ -59,6 +89,7 @@ struct App {
     sc::GameHost host;
     bridge::SharedMemory memory;
     bridge::NativeMovement movement;
+    bridge::NativeDriver driver;
     bridge::Compositor compositor;
     bridge::LatestFrame latest;
     std::shared_ptr<bridge::Frame> renderFrame;
@@ -86,7 +117,7 @@ struct App {
     uint64_t frames{}, depthFrame{}, sequence{}, lastPeerLog{};
     sc::PlayerSnapshot player;
     sc::Camera camera;
-    bool initialized{}, nativeCamera = true, showMenu{}, edit{}, reverseDepth = true, hideOriginal = true,
+    bool initialized{}, nativeCamera = true, showMenu{}, edit=true, reverseDepth = true, hideOriginal = true,
                         guiOwned{}, heroHidden{}, playerFeatures = true;
     std::array<bridge::KeyEdge, 256> keys;
     int cursorAdjustment{};
@@ -120,6 +151,7 @@ struct App {
     }
     void update() {
         movement.tryInstall();
+        driver.tryInstall();
         bool focused = GetForegroundWindow() == window;
         if (focused) {
             if (pressed(VK_F7))
@@ -136,7 +168,10 @@ struct App {
         bool scene = player.valid && camera.valid && sceneDepth && frames - depthFrame <= 2 &&
                      (!vitals.valid || vitals.hp > 0);
         bool capturing = focused && (showMenu || (scene && (mcStatus.load() & 2) != 0));
-        sc::input::capture = capturing;
+        bool mcOwner=scene && playerFeatures && driver.ready() && movement.installed() &&
+                     movement.canFly() && (mcStatus.load() & 8)!=0;
+        sc::input::mcOwner=mcOwner && focused;
+        sc::input::capture = capturing || (mcOwner && focused);
         sc::input::mcEdit = focused && scene && edit && !showMenu && (mcStatus.load() & 1) != 0;
         sc::input::flying = focused && scene && edit && !showMenu && movement.canFly() &&
                             (mcStatus.load() & 4) != 0;
@@ -149,9 +184,11 @@ struct App {
         control.epoch = epoch;
         control.flags = (scene ? bridge::Scene : 0) | (focused ? bridge::Focus : 0) |
                         (edit ? bridge::Edit : 0) |
-                        (capturing ? bridge::Menu : 0);
+                        (showMenu ? bridge::Menu : 0);
         control.capabilities = 7 | (playerFeatures && movement.installed() ? bridge::constraintCapability : 0) |
                                (playerFeatures && movement.canFly() ? bridge::flightCapability : 0);
+        if(playerFeatures && driver.ready() && movement.installed() && movement.canFly())
+            control.capabilities |= bridge::mcOwnerCapability | bridge::terrainCapability;
         std::fill(control.keys.begin(), control.keys.end(), 0);
         control.buttons = 0;
         if (focused && !showMenu) {
@@ -191,12 +228,18 @@ struct App {
         POINT point{};
         GetCursorPos(&point);
         ScreenToClient(window, &point);
-        float sceneWidth = std::min(float(width), float(height) * control.aspect),
-              sceneHeight = sceneWidth / control.aspect;
-        control.mouseX = (point.x - (width - sceneWidth) / 2) / sceneWidth;
-        control.mouseY = (point.y - (height - sceneHeight) / 2) / sceneHeight;
+        inputAspect=control.aspect;
+        auto gui=guiPoint(window,point.x,point.y);
+        control.mouseX=gui.first;control.mouseY=gui.second;
+        {
+            std::unique_lock lock(eventMutex,std::try_to_lock);
+            if(lock){inputQueue.tick=control.tickMs;inputQueue.epoch=control.epoch;
+                inputQueue.dx=sc::input::mouseDx.load();inputQueue.dy=sc::input::mouseDy.load();
+                memory.input.write(inputQueue);}
+        }
         memory.writeControl(control);
-        movement.update(control, playerFeatures && scene && focused && (mcStatus.load() & 1) != 0);
+        movement.update(control, playerFeatures && scene && (mcStatus.load() & 1) != 0);
+        driver.update(control,mcOwner);
         if (!scene || !focused || showMenu) {
             latest.store(nullptr);
             renderFrame.reset();
@@ -212,13 +255,19 @@ struct App {
                     std::to_string(movement.playerCalls.load()) + " constrained=" +
                     std::to_string(movement.correctedMoves.load()) + " flying=" +
                     std::to_string(movement.flightMoves.load()));
+            sc::log("MC driver cameraCalls="+std::to_string(driver.cameraCalls.load())+
+                    " controlledMoves="+std::to_string(driver.controlledMoves.load())+
+                    " groundHits="+std::to_string(driver.terrainHits.load())+
+                    " terrainSamples="+std::to_string(driver.terrainSamples.load())+
+                    " mouseState="+std::to_string(sc::input::mouseStates.load())+
+                    " mouseData="+std::to_string(sc::input::mouseData.load()));
         }
     }
     void hud() {
         if (!showMenu)
             return;
         ImGui::Begin("Sekiro + Minecraft passthrough", &showMenu);
-        ImGui::Text("Two real processes | protocol v1 | F7 diagnostics / F8 edit / F9 test block");
+        ImGui::Text("Minecraft owns the player | F7 diagnostics / F8 input pause / F9 test block");
         ImGui::Text("Sekiro: %s | camera: %s | depth: %s", player.valid ? "loaded" : "not loaded",
                     camera.valid ? "live" : "missing", sceneDepth ? "captured" : "missing");
         ImGui::Text("MC: %s | composite frames: %llu",
@@ -226,26 +275,32 @@ struct App {
                     (unsigned long long)compositor.submitted);
         ImGui::Text("IPC busy retries: %llu | skipped presents: %llu", (unsigned long long)statusBusy.load(),
                     (unsigned long long)skippedPresents.load());
-        ImGui::Checkbox("Forward MC actions (F8)", &edit);
-        ImGui::Checkbox("Enable experimental player collision / flight", &playerFeatures);
-        ImGui::Text("Player block constraints: %s / creative flight (F6): %s",
+        ImGui::Checkbox("Accept MC input (F8)", &edit);
+        ImGui::Checkbox("Enable MC player / camera adapter", &playerFeatures);
+        ImGui::Text("Player position hook: %s / MC movement adapter: %s",
                     movement.installed() ? "hook ready (needs game validation)" : "waiting for verified hook",
                     movement.canFly() ? "available (needs game validation)" : "unavailable");
         ImGui::Text("Native hero hidden: %s | player callbacks: %llu | corrections: %llu | flight: %llu",
                     heroHidden ? "yes" : "no", (unsigned long long)movement.playerCalls.load(),
                     (unsigned long long)movement.correctedMoves.load(), (unsigned long long)movement.flightMoves.load());
-        ImGui::TextWrapped("MC edit: I inventory / O drop / J swap hands / 1-9 slots / mouse mine-place. E/Q/F remain Sekiro controls.");
+        ImGui::TextWrapped("MC controls: WASD / Space jump (double-tap creative flight) / Shift sneak / Ctrl sprint / E inventory / Q drop / F swap / F5 perspective.");
+        ImGui::Text("MC camera=%llu | MC positions=%llu",(unsigned long long)driver.cameraCalls.load(),
+                    (unsigned long long)driver.controlledMoves.load());
+        ImGui::Text("Native ground hits=%llu / 81 | mouse state/data=%llu/%llu",
+            (unsigned long long)driver.terrainHits.load(),(unsigned long long)sc::input::mouseStates.load(),
+            (unsigned long long)sc::input::mouseData.load());
         ImGui::Checkbox("Hide native hero when MC frame is valid", &hideOriginal);
         ImGui::Checkbox("Host uses reversed Z", &reverseDepth);
         ImGui::TextWrapped("%s", status.c_str());
         ImGui::TextWrapped("%s", compositor.error.c_str());
         ImGui::TextWrapped(
-            "MC boxes constrain only the player; NPC Havok collision, native ground raycast and cross-game damage remain unavailable.");
+            "Native terrain is an experimental local height field. Native NPC block collision and cross-game damage remain unavailable.");
         ImGui::End();
     }
 };
 App *app{};
 LRESULT CALLBACK modWndProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
+    recordInput(hwnd,msg,w,l);
     if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && w < 256 && !(l & (1LL << 30)))
         pendingKeys[w] = true;
     if (msg == WM_MOUSEWHEEL)
@@ -577,6 +632,8 @@ DWORD WINAPI scBootstrap(void *) {
             return 0;
         }
         app->movement.initialize(app->host.base(), app->memory.physics);
+        app->driver.initialize(app->host.base(),app->memory);
+        app->movement.driver(app->driver);
         LARGE_INTEGER counter{};
         QueryPerformanceCounter(&counter);
         app->epoch = (uint64_t(counter.QuadPart) ^ (uint64_t(GetCurrentProcessId()) << 32)) | 1;

@@ -20,6 +20,21 @@ public final class JniPeer {
         }
         if (state == null || state.command() != 77 || state.text()[0] != 0x4e2d)
             throw new AssertionError("C++ control not received");
+        var input=Protocol.direct(4136);var terrain=Protocol.direct(448);
+        while(System.currentTimeMillis()<deadline && (!NativeBridge.input(handle,input) || !NativeBridge.terrain(handle,terrain)))Thread.sleep(5);
+        if(input.getLong(16)!=2 || input.getLong(24)!=17 || input.getLong(32)!=-9 ||
+           input.getInt(40)!=2 || input.getInt(48)!=1 || input.getInt(80)!=0 ||
+           input.getFloat(56)!=.25f || input.getFloat(88)!=.26f || input.getInt(52)!=1)
+            throw new AssertionError("quick down/up, individual coordinates and Shift modifier survive one poll");
+        if(terrain.get(404)!=1 || terrain.getFloat(200)!=3.5f || terrain.getFloat(24)!=12)
+            throw new AssertionError("native terrain grid ABI");
+        var player=Protocol.direct(104);
+        player.putLong(77).putLong(NativeBridge.clockMs()).putLong(state.tickMs()).putLong(state.epoch());
+        player.putInt(5).putFloat(180).putFloat(12).putFloat(4).putFloat(8);
+        player.putFloat(12).putFloat(5.62f).putFloat(8).putFloat(0).putFloat(0).putFloat(1);
+        player.putFloat(1.1f).putFloat(16f/9).putFloat(.05f).putFloat(500);
+        player.putFloat(4).putFloat(0).putFloat(0);
+        if(!NativeBridge.player(handle,player))throw new AssertionError("MC player feedback");
         var pixels = Protocol.direct(4 * 4 * 12);
         for (int i = 0; i < pixels.capacity(); ++i)
             pixels.put((byte)0x6b);

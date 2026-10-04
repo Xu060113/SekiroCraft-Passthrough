@@ -57,6 +57,25 @@ public final class ProtocolSelfTest {
         require(!NativeBridge.physics(handle, physics), "shape count overflow rejected");
         physics.putInt(28, 0);
         require(NativeBridge.physics(handle, physics), "valid empty shape snapshot accepted");
+        require(!NativeBridge.input(handle,ByteBuffer.allocate(4136)),"non-direct input rejected");
+        require(!NativeBridge.input(handle,Protocol.direct(4135)),"truncated event ring rejected");
+        require(!NativeBridge.terrain(handle,Protocol.direct(447)),"truncated terrain rejected");
+        require(!NativeBridge.player(handle,ByteBuffer.allocate(104)),"non-direct player rejected");
+        require(!NativeBridge.player(handle,Protocol.direct(103)),"truncated player rejected");
+        var player=Protocol.direct(104);
+        player.putLong(1).putLong(NativeBridge.clockMs()).putLong(s.tickMs()).putLong(s.epoch()).putInt(1).putFloat(180);
+        player.putFloat(0).putFloat(0).putFloat(0).putFloat(0).putFloat(1.62f).putFloat(0);
+        player.putFloat(0).putFloat(0).putFloat(1).putFloat(1.1f).putFloat(16f/9).putFloat(.05f).putFloat(500);
+        player.putFloat(0).putFloat(0).putFloat(0);
+        require(NativeBridge.player(handle,player),"valid MC player/camera accepted");
+        player.putFloat(52,Float.NaN);require(!NativeBridge.player(handle,player),"nonfinite eye rejected");
+        var rendered=s.withCamera(1,2,3,1,0,0);
+        var actual=Protocol.metadata(rendered,10,4,4,12345);
+        require(actual.getLong(8)==12345 && actual.getFloat(48)==1 && actual.getFloat(60)==1,
+            "actual captured pose and capture timestamp, not current host camera");
+        require(InputForwarder.glfwKey(116)==294 && InputForwarder.glfwKey(32)==32 &&
+                InputForwarder.glfwKey(69)==69,"MC F5, jump and inventory mappings");
+        require(s.withFov((float)Math.toRadians(7)).valid(),"MC spyglass projection can cross the bridge");
         NativeBridge.close(handle);
         System.out.println(checks + " Java/JNI protocol checks passed");
     }

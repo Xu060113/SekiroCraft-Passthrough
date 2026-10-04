@@ -10,7 +10,7 @@ public final class Protocol {
                         float py, float pz, float ex, float ey, float ez, float fx, float fy, float fz,
                         float fov, float aspect, float near, float far, float yOffset, float scale, int width,
                         int height, byte[] keys, float mouseX, float mouseY, int wheel, int buttons,
-                        int command, long textSequence, int[] text) {
+                        int command, long textSequence, int[] text,float captureYaw) {
         public boolean valid() {
             if (sequence <= 0 || epoch == 0 || width <= 0 || width > MAX_WIDTH || height <= 0 ||
                 height > MAX_HEIGHT || !Float.isFinite(yOffset) || Math.abs(yOffset) > 100000 ||
@@ -23,8 +23,8 @@ public final class Protocol {
                 if (!Float.isFinite(f))
                     return false;
             return Math.abs(px) <= 1e5 && Math.abs(py) <= 1e5 && Math.abs(pz) <= 1e5 && Math.abs(ex) <= 1e6 &&
-                Math.abs(ey) <= 1e6 && Math.abs(ez) <= 1e6 && norm > .99 && norm < 1.01 && fov > .2 &&
-                fov < 2.8 && aspect >= .7 && aspect <= 4 && near > 0 && far > near && far <= 100000;
+                Math.abs(ey) <= 1e6 && Math.abs(ez) <= 1e6 && norm > .99 && norm < 1.01 && fov > .025 &&
+                fov < 3.05 && aspect >= .7 && aspect <= 4 && near > 0 && far > near && far <= 100000;
         }
         public boolean active(long now) {
             return valid() && fresh(now, tickMs) && (flags & (SCENE | FOCUS)) == (SCENE | FOCUS);
@@ -35,6 +35,17 @@ public final class Protocol {
         public double mcZ(double z) { return -z * scale; }
         public float yaw() { return (float)Math.toDegrees(Math.atan2(-fx, -fz)); }
         public float pitch() { return (float)Math.toDegrees(Math.atan2(-fy, Math.hypot(fx, fz))); }
+        public State withCamera(float x,float y,float z,float vx,float vy,float vz) {
+            return withCamera(x,y,z,vx,vy,vz,(float)Math.toDegrees(Math.atan2(-vx,-vz)));
+        }
+        public State withCamera(float x,float y,float z,float vx,float vy,float vz,float yaw) {
+            return new State(sequence,tickMs,epoch,flags,capabilities,px,py,pz,x,y,z,vx,vy,vz,
+                fov,aspect,near,far,yOffset,scale,width,height,keys,mouseX,mouseY,wheel,buttons,command,textSequence,text,yaw);
+        }
+        public State withFov(float value){
+            return new State(sequence,tickMs,epoch,flags,capabilities,px,py,pz,ex,ey,ez,fx,fy,fz,
+                value,aspect,near,far,yOffset,scale,width,height,keys,mouseX,mouseY,wheel,buttons,command,textSequence,text,captureYaw);
+        }
     }
     public static boolean fresh(long now, long stamp) {
         return stamp > 0 && now >= stamp && now - stamp <= 350;
@@ -64,12 +75,15 @@ public final class Protocol {
             text[i] = b.getInt();
         return new State(sequence, tick, epoch, flags, capabilities, p[0], p[1], p[2], p[3], p[4], p[5], p[6],
                          p[7], p[8], p[9], p[10], p[11], p[12], p[13], p[14], width, height, keys, mouseX,
-                         mouseY, wheel, buttons, command, textSequence, text);
+                         mouseY, wheel, buttons, command, textSequence, text,(float)Math.toDegrees(Math.atan2(-p[6],-p[8])));
     }
     public static ByteBuffer metadata(State s, long sequence, int width, int height) {
+        return metadata(s,sequence,width,height,NativeBridge.clockMs());
+    }
+    public static ByteBuffer metadata(State s,long sequence,int width,int height,long capturedAt) {
         ByteBuffer b = direct(META_BYTES);
-        b.putLong(sequence).putLong(NativeBridge.clockMs()).putLong(s.epoch).putLong(s.sequence);
-        b.putInt(width).putInt(height).putInt(3).putInt(0);
+        b.putLong(sequence).putLong(capturedAt).putLong(s.epoch).putLong(s.sequence);
+        b.putInt(width).putInt(height).putInt(7).putFloat(s.captureYaw);
         b.putFloat(s.ex).putFloat(s.ey).putFloat(s.ez).putFloat(s.fx).putFloat(s.fy).putFloat(s.fz);
         b.putFloat(s.fov).putFloat(s.aspect).putFloat(s.near).putFloat(s.far).putLong(s.tickMs);
         return b.flip();

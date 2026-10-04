@@ -64,4 +64,24 @@ JNIEXPORT jboolean JNICALL Java_dev_sekirobridge_NativeBridge_physics(JNIEnv *en
     bridge::PhysicsPacket p; std::memcpy(&p, bytes, sizeof(p));
     return reinterpret_cast<bridge::SharedMemory *>(handle)->physics.write(p);
 }
+JNIEXPORT jboolean JNICALL Java_dev_sekirobridge_NativeBridge_input(JNIEnv *env,jclass,jlong handle,jobject b) {
+    if(!handle || !b || env->GetDirectBufferCapacity(b)<jlong(sizeof(bridge::InputPacket)))return false;
+    auto ptr=env->GetDirectBufferAddress(b);if(!ptr)return false;
+    bridge::InputPacket p;
+    if(!reinterpret_cast<bridge::SharedMemory*>(handle)->input.read(p) || !bridge::validInput(p))return false;
+    std::memcpy(ptr,&p,sizeof(p));return true;
+}
+JNIEXPORT jboolean JNICALL Java_dev_sekirobridge_NativeBridge_player(JNIEnv *env,jclass,jlong handle,jobject b) {
+    if(!handle || !b || env->GetDirectBufferCapacity(b)<jlong(sizeof(bridge::PlayerPacket)))return false;
+    auto ptr=env->GetDirectBufferAddress(b);if(!ptr)return false;
+    bridge::PlayerPacket p;std::memcpy(&p,ptr,sizeof(p));
+    return bridge::validPlayer(p) && reinterpret_cast<bridge::SharedMemory*>(handle)->player.write(p);
+}
+JNIEXPORT jboolean JNICALL Java_dev_sekirobridge_NativeBridge_terrain(JNIEnv *env,jclass,jlong handle,jobject b) {
+    if(!handle || !b || env->GetDirectBufferCapacity(b)<jlong(sizeof(bridge::TerrainPacket)))return false;
+    auto ptr=env->GetDirectBufferAddress(b);if(!ptr)return false;
+    bridge::TerrainPacket p;
+    if(!reinterpret_cast<bridge::SharedMemory*>(handle)->terrain.read(p) || !bridge::validTerrain(p))return false;
+    std::memcpy(ptr,&p,sizeof(p));return true;
+}
 }

@@ -8,6 +8,7 @@
 #include <windows.h>
 #include "protocol.hpp"
 #include "physics.hpp"
+#include "session.hpp"
 #include <string>
 #include <memory>
 
@@ -50,6 +51,9 @@ class SharedMemory {
 
   public:
     PhysicsChannel physics;
+    SnapshotChannel<InputPacket> input;
+    SnapshotChannel<PlayerPacket> player;
+    SnapshotChannel<TerrainPacket> terrain;
     ~SharedMemory() { close(); }
     SharedMemory() = default;
     SharedMemory(const SharedMemory &) = delete;
@@ -68,6 +72,8 @@ class SharedMemory {
         if (!validChannel(channel))
             return false;
         if (!physics.open(channel)) return false;
+        if (!input.open(channel,L"input-v2") || !player.open(channel,L"player-v2") ||
+            !terrain.open(channel,L"terrain-v2")) {close();return false;}
         auto name = L"Local\\SekiroBridge-" + channel;
         mutex_ = CreateMutexW(nullptr, FALSE, (name + L"-lock").c_str());
         mapping_ = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, DWORD(mappingBytes),
@@ -95,6 +101,7 @@ class SharedMemory {
     }
     void close() {
         physics.close();
+        input.close(); player.close(); terrain.close();
         if (bytes_)
             UnmapViewOfFile(bytes_);
         if (mapping_)

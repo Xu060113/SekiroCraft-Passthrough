@@ -22,6 +22,9 @@ public final class BridgeClient implements ClientModInitializer {
     private static long handle;
     private static final ByteBuffer control = Protocol.direct(Protocol.CONTROL_BYTES);
     private static volatile Protocol.State state;
+    private static Protocol.State renderPose;
+    private static boolean wasConnected;
+    private static float frameFov=Float.NaN;
     private static volatile boolean armed;
     private static Perspective previousPerspective;
     private static Object worldIdentity;
@@ -30,10 +33,24 @@ public final class BridgeClient implements ClientModInitializer {
     private static final PlayerSync PLAYERS = new PlayerSync();
     private static final PhysicsExporter PHYSICS = new PhysicsExporter();
     public static Protocol.State state() { return state; }
+    public static Protocol.State renderPose(){return renderPose;}
+    public static void renderPose(Protocol.State pose){renderPose=pose;}
+    public static float projectionFov(double degrees){
+        float f=(float)Math.toRadians(Math.max(2,Math.min(170,degrees)));
+        if(!Float.isFinite(frameFov))frameFov=f;
+        return f;
+    }
+    public static float frameFov(){return Float.isFinite(frameFov)?frameFov:state.fov();}
     public static long handle() { return handle; }
+    public static boolean keyHeld(int key){return INPUT.held(key);}
     public static boolean armed() { return armed && handle != 0; }
     public static boolean active() {
-        return handle != 0 && armed && state != null && state.active(NativeBridge.clockMs()) &&
+        return connected() && (state.flags()&Protocol.FOCUS)!=0;
+    }
+    public static boolean connected(){
+        return handle != 0 && armed && state != null && state.valid() &&
+            Protocol.fresh(NativeBridge.clockMs(),state.tickMs()) && (state.flags()&Protocol.SCENE)!=0 &&
+            (state.capabilities()&256)!=0 && MinecraftClient.getInstance().player!=null &&
             MinecraftClient.getInstance().world != null && MinecraftClient.getInstance().getServer() != null;
     }
     public static void poll() {
@@ -58,19 +75,28 @@ public final class BridgeClient implements ClientModInitializer {
             INPUT.release();
             FRAMES.discard();
         }
+        boolean connected=connected();
+        if(!connected && wasConnected)PLAYERS.reset();
+        wasConnected=connected;
+        if(connected)NativeTerrain.poll(state);
         if (handle != 0)
-            NativeBridge.status(handle, active() ? (1 | (client.currentScreen != null ? 2 : 0) |
+            NativeBridge.status(handle, connected() ? (1 | 8 | (client.currentScreen != null ? 2 : 0) |
                 (client.player != null && client.player.getAbilities().flying &&
                  (state.capabilities() & 128) != 0 ? 4 : 0)) : 0,
                                 state != null ? state.epoch() : 0);
     }
     public static void renderBegin() {
         poll();
-        if (active())
+        renderPose=null;
+        frameFov=Float.NaN;
+        if (connected())
             PLAYERS.client(state);
+        if(active())INPUT.update(state);
     }
     private static void disarm() {
         armed = false;
+        wasConnected=false;
+        PLAYERS.reset();renderPose=null;
         if (previousPerspective != null) {
             MinecraftClient.getInstance().options.setPerspective(previousPerspective);
             previousPerspective = null;
@@ -118,10 +144,10 @@ public final class BridgeClient implements ClientModInitializer {
                             if (!armed)
                                 previousPerspective = client.options.getPerspective();
                             armed = true;
-                            client.options.setPerspective(Perspective.THIRD_PERSON_BACK);
+                            client.options.setPerspective(Perspective.FIRST_PERSON);
                             ctx.getSource().sendFeedback(
-                                Text.literal("Bridge armed for this world. Use F8 in Sekiro for MC " +
-                                             "interactions; /sekirobridge off releases it."));
+                                Text.literal("Minecraft player controls armed: WASD / E inventory / Space jump / F5 view. " +
+                                    "Requires the paired MC camera adapter; F8 pauses input; /sekirobridge off releases it."));
                             return Command.SINGLE_SUCCESS;
                         }))
                         .then(literal("off").executes(ctx -> {
@@ -148,11 +174,10 @@ public final class BridgeClient implements ClientModInitializer {
         ClientTickEvents.END_CLIENT_TICK.register(c -> {
             if (active()) {
                 PLAYERS.client(state);
-                PLAYERS.animate();
                 PHYSICS.update(state);
             }
         });
-        ServerTickEvents.END_SERVER_TICK.register(server -> PLAYERS.server(server, active() ? state : null));
+        ServerTickEvents.END_SERVER_TICK.register(server -> PLAYERS.server(server, connected() ? state : null));
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> PLAYERS.server(server, null));
         ClientLifecycleEvents.CLIENT_STOPPING.register(c -> {
             disarm();

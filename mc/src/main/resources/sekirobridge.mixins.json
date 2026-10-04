@@ -2,6 +2,6 @@
   "required": true,
   "package": "dev.sekirobridge.mixin",
   "compatibilityLevel": "JAVA_17",
-  "client": ["CameraMixin", "GameRendererMixin", "WorldRendererMixin", "BackgroundRendererMixin", "InputInvoker", "KeyboardInvoker", "ClientMixin", "MouseMixin", "InputUtilMixin", "InGameHudMixin"],
+  "client": ["CameraMixin", "GameRendererMixin", "WorldRendererMixin", "BackgroundRendererMixin", "InputInvoker", "KeyboardInvoker", "ClientMixin", "MouseMixin", "InputUtilMixin", "InGameHudMixin", "KeyboardMixin", "CollisionViewMixin"],
   "injectors": { "defaultRequire": 1 }
 }

@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -21,7 +22,7 @@ enum Capabilities : uint32_t {
     NativeBlockCollision = 16,
     NativeCombat = 32
 };
-enum FrameFlags : uint32_t { BottomUp = 1, Overlay = 2 };
+enum FrameFlags : uint32_t { BottomUp = 1, Overlay = 2, ExplicitYaw = 4 };
 struct alignas(8) Control {
     uint64_t sequence{}, tickMs{}, epoch{};
     uint32_t flags{}, capabilities = CameraSync | Input | DepthComposite;
@@ -54,8 +55,10 @@ struct Frame {
 };
 inline bool valid(const FrameMeta &m) {
     if (!m.sequence || !m.epoch || !m.width || !m.height || m.width > maxWidth || m.height > maxHeight ||
-        m.width * uint64_t(m.height) > maxPixels || (m.flags & ~(BottomUp | Overlay)))
+        m.width * uint64_t(m.height) > maxPixels || (m.flags & ~(BottomUp | Overlay | ExplicitYaw)))
         return false;
+    if ((m.flags & ExplicitYaw) && (!std::isfinite(std::bit_cast<float>(m.reserved)) ||
+        std::abs(std::bit_cast<float>(m.reserved))>360)) return false;
     for (auto f : m.eye)
         if (!std::isfinite(f) || std::abs(f) > 1e6f)
             return false;
@@ -65,7 +68,7 @@ inline bool valid(const FrameMeta &m) {
             return false;
         norm += f * f;
     }
-    return norm > .99f && norm < 1.01f && std::isfinite(m.fovY) && m.fovY > .2f && m.fovY < 2.8f &&
+    return norm > .99f && norm < 1.01f && std::isfinite(m.fovY) && m.fovY > .025f && m.fovY < 3.05f &&
            std::isfinite(m.aspect) && m.aspect >= .7f && m.aspect <= 4 && std::isfinite(m.nearZ) &&
            m.nearZ > 0 && std::isfinite(m.farZ) && m.farZ > m.nearZ && m.farZ <= 100000;
 }

@@ -1,169 +1,101 @@
 package dev.sekirobridge;
-
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.util.InputUtil;
 import net.minecraft.client.option.KeyBinding;
+import net.minecraft.client.util.InputUtil;
 import dev.sekirobridge.mixin.InputInvoker;
 import dev.sekirobridge.mixin.KeyboardInvoker;
 import org.lwjgl.glfw.GLFW;
+import java.nio.ByteBuffer;
 
-final class InputForwarder {
-    private final int[] pressed = new int[256];
-    private int buttons, wheel;
-    private long textSequence, epoch;
+public final class InputForwarder {
+    public static boolean replaying;
+    public static int replayMods=-1;
+    private final int[] pressed=new int[256];
+    private final ByteBuffer events=Protocol.direct(4136);
+    private int buttons;
+    private long epoch,eventSequence,dx,dy,textSequence;
     private boolean initialized;
-    private boolean flyKey, ownsFlight, oldFlying;
-    private net.minecraft.client.network.ClientPlayerEntity flyingPlayer;
+    boolean held(int key){for(int vk:pressed)if(vk!=0 && vk==key)return true;return false;}
     static int glfwKey(int vk) {
-        if (vk >= 48 && vk <= 57 || vk >= 65 && vk <= 90)
-            return vk;
-        return switch (vk) {
-            case 8 -> GLFW.GLFW_KEY_BACKSPACE;
-            case 9 -> GLFW.GLFW_KEY_TAB;
-            case 13 -> GLFW.GLFW_KEY_ENTER;
-            case 16, 160 -> GLFW.GLFW_KEY_LEFT_SHIFT;
-            case 161 -> GLFW.GLFW_KEY_RIGHT_SHIFT;
-            case 17, 162 -> GLFW.GLFW_KEY_LEFT_CONTROL;
-            case 163 -> GLFW.GLFW_KEY_RIGHT_CONTROL;
-            case 18, 164 -> GLFW.GLFW_KEY_LEFT_ALT;
-            case 165 -> GLFW.GLFW_KEY_RIGHT_ALT;
-            case 27 -> GLFW.GLFW_KEY_ESCAPE;
-            case 32 -> GLFW.GLFW_KEY_SPACE;
-            case 33 -> GLFW.GLFW_KEY_PAGE_UP;
-            case 34 -> GLFW.GLFW_KEY_PAGE_DOWN;
-            case 35 -> GLFW.GLFW_KEY_END;
-            case 36 -> GLFW.GLFW_KEY_HOME;
-            case 37 -> GLFW.GLFW_KEY_LEFT;
-            case 38 -> GLFW.GLFW_KEY_UP;
-            case 39 -> GLFW.GLFW_KEY_RIGHT;
-            case 40 -> GLFW.GLFW_KEY_DOWN;
-            case 46 -> GLFW.GLFW_KEY_DELETE;
-            case 186 -> GLFW.GLFW_KEY_SEMICOLON;
-            case 187 -> GLFW.GLFW_KEY_EQUAL;
-            case 188 -> GLFW.GLFW_KEY_COMMA;
-            case 189 -> GLFW.GLFW_KEY_MINUS;
-            case 190 -> GLFW.GLFW_KEY_PERIOD;
-            case 191 -> GLFW.GLFW_KEY_SLASH;
-            case 192 -> GLFW.GLFW_KEY_GRAVE_ACCENT;
-            case 219 -> GLFW.GLFW_KEY_LEFT_BRACKET;
-            case 220 -> GLFW.GLFW_KEY_BACKSLASH;
-            case 221 -> GLFW.GLFW_KEY_RIGHT_BRACKET;
-            case 222 -> GLFW.GLFW_KEY_APOSTROPHE;
-            default -> GLFW.GLFW_KEY_UNKNOWN;
+        if(vk>=48 && vk<=57 || vk>=65 && vk<=90)return vk;
+        if(vk>=112 && vk<=123)return GLFW.GLFW_KEY_F1+vk-112;
+        return switch(vk){
+            case 8 -> GLFW.GLFW_KEY_BACKSPACE; case 9 -> GLFW.GLFW_KEY_TAB;
+            case 13 -> GLFW.GLFW_KEY_ENTER; case 16,160 -> GLFW.GLFW_KEY_LEFT_SHIFT;
+            case 161 -> GLFW.GLFW_KEY_RIGHT_SHIFT; case 17,162 -> GLFW.GLFW_KEY_LEFT_CONTROL;
+            case 163 -> GLFW.GLFW_KEY_RIGHT_CONTROL; case 18,164 -> GLFW.GLFW_KEY_LEFT_ALT;
+            case 165 -> GLFW.GLFW_KEY_RIGHT_ALT; case 27 -> GLFW.GLFW_KEY_ESCAPE;
+            case 32 -> GLFW.GLFW_KEY_SPACE; case 33 -> GLFW.GLFW_KEY_PAGE_UP;
+            case 34 -> GLFW.GLFW_KEY_PAGE_DOWN; case 35 -> GLFW.GLFW_KEY_END;
+            case 36 -> GLFW.GLFW_KEY_HOME; case 37 -> GLFW.GLFW_KEY_LEFT;
+            case 38 -> GLFW.GLFW_KEY_UP; case 39 -> GLFW.GLFW_KEY_RIGHT;
+            case 40 -> GLFW.GLFW_KEY_DOWN; case 46 -> GLFW.GLFW_KEY_DELETE;
+            case 186 -> GLFW.GLFW_KEY_SEMICOLON; case 187 -> GLFW.GLFW_KEY_EQUAL;
+            case 188 -> GLFW.GLFW_KEY_COMMA; case 189 -> GLFW.GLFW_KEY_MINUS;
+            case 190 -> GLFW.GLFW_KEY_PERIOD; case 191 -> GLFW.GLFW_KEY_SLASH;
+            case 192 -> GLFW.GLFW_KEY_GRAVE_ACCENT; case 219 -> GLFW.GLFW_KEY_LEFT_BRACKET;
+            case 220 -> GLFW.GLFW_KEY_BACKSLASH; case 221 -> GLFW.GLFW_KEY_RIGHT_BRACKET;
+            case 222 -> GLFW.GLFW_KEY_APOSTROPHE; default -> GLFW.GLFW_KEY_UNKNOWN;
         };
     }
-    void update(Protocol.State s) {
-        var c = MinecraftClient.getInstance();
-        long window = c.getWindow().getHandle();
-        if (!initialized || epoch != s.epoch()) {
-            release();
-            initialized = true;
-            epoch = s.epoch();
-            wheel = s.wheel();
-            textSequence = s.textSequence();
-        }
-        boolean screen = c.currentScreen != null, edit = (s.flags() & Protocol.EDIT) != 0;
-        boolean flightAvailable = edit && (s.capabilities() & 128) != 0 && c.player.isCreative() && c.player.getAbilities().allowFlying;
-        boolean f6 = s.key(117);
-        if (flightAvailable && !screen && f6 && !flyKey) {
-            if (!ownsFlight) {
-                ownsFlight = true; flyingPlayer = c.player;
-                oldFlying = c.player.getAbilities().flying;
-            }
-            c.player.getAbilities().flying = !c.player.getAbilities().flying;
-            c.player.fallDistance = 0;
-            c.player.sendAbilitiesUpdate();
-        }
-        flyKey = f6;
-        if (!flightAvailable) releaseFlight();
-        int mods = ((screen ? s.key(16) : s.key(18)) ? GLFW.GLFW_MOD_SHIFT : 0) |
-                   (s.key(17) ? GLFW.GLFW_MOD_CONTROL : 0) | (screen && s.key(18) ? GLFW.GLFW_MOD_ALT : 0);
-        for (int vk = 8; vk < 256; ++vk) {
-            // WASD and camera movement belong to Sekiro. In screens, forward their UI key events.
-            boolean allowed =
-                screen ||
-                (edit && (vk == 73 || vk == 79 || vk == 74 || vk >= 49 && vk <= 57 || vk == 18 || vk == 17));
-            int key = glfwKey(vk);
-            if (key == GLFW.GLFW_KEY_UNKNOWN)
-                continue;
-            boolean down = allowed && s.key(vk);
-            // Retain the key chosen at press until release, even if that press
-            // opens a screen. Otherwise E stays held while I is released.
-            if (!down && pressed[vk] != 0) {
-                ((KeyboardInvoker)c.keyboard)
-                    .bridgeKey(window, pressed[vk], 0, GLFW.GLFW_RELEASE, mods);
-                pressed[vk] = 0;
-            } else if (down && pressed[vk] == 0) {
-                boolean inventory = c.currentScreen instanceof net.minecraft.client.gui.screen.ingame.InventoryScreen ||
-                    c.currentScreen instanceof net.minecraft.client.gui.screen.ingame.CreativeInventoryScreen;
-                if (!screen || inventory && vk == 73)
-                    key = vk == 73 ? GLFW.GLFW_KEY_E : vk == 79 ? GLFW.GLFW_KEY_Q : vk == 74 ? GLFW.GLFW_KEY_F :
-                        vk == 18 ? GLFW.GLFW_KEY_LEFT_SHIFT : key;
-                pressed[vk] = key;
-                ((KeyboardInvoker)c.keyboard).bridgeKey(window, key, 0, GLFW.GLFW_PRESS, mods);
-            }
-        }
-        // Mouse coordinates in the actual MC window; its GUI scale is handled by vanilla Mouse.
-        if (screen)
-            ((InputInvoker)c.mouse)
-                .bridgeCursor(window, Math.max(0, Math.min(1, s.mouseX())) * c.getWindow().getWidth(),
-                              Math.max(0, Math.min(1, s.mouseY())) * c.getWindow().getHeight());
-        int nextButtons = screen || edit ? s.buttons() : 0;
-        for (int i = 0; i < 3; ++i)
-            if (((buttons ^ nextButtons) & (1 << i)) != 0)
-                ((InputInvoker)c.mouse)
-                    .bridgeButton(window, i,
-                                  (nextButtons & (1 << i)) != 0 ? GLFW.GLFW_PRESS : GLFW.GLFW_RELEASE, mods);
-        buttons = nextButtons;
-        int delta = s.wheel() - wheel;
-        wheel = s.wheel();
-        if ((screen || edit) && delta != 0 && Math.abs(delta) <= 120 * 8)
-            ((InputInvoker)c.mouse).bridgeScroll(window, 0, delta / 120.0);
-        if (s.textSequence() >= textSequence) {
-            long first = Math.max(textSequence, s.textSequence() - 8);
-            for (long i = first; i < s.textSequence(); ++i)
-                if (screen) {
-                    int cp = s.text()[(int)(i % 8)];
-                    if (Character.isValidCodePoint(cp))
-                        ((KeyboardInvoker)c.keyboard).bridgeChar(window, cp, mods);
-                }
-        }
-        textSequence = s.textSequence();
-        if (!screen)
-            c.player.input.movementForward = c.player.input.movementSideways = 0;
+    private void cursor(float x,float y){var c=MinecraftClient.getInstance();
+        ((InputInvoker)c.mouse).bridgeCursor(c.getWindow().getHandle(),
+            Math.max(0,Math.min(1,x))*c.getWindow().getWidth(),Math.max(0,Math.min(1,y))*c.getWindow().getHeight());}
+    private void key(int vk,int action,int mods){
+        if(vk<8 || vk>=256 || vk>=118 && vk<=120 || vk>=160 && vk<=165)return;
+        int key=glfwKey(vk);if(key==GLFW.GLFW_KEY_UNKNOWN)return;
+        var c=MinecraftClient.getInstance();
+        if(action==0){if(pressed[vk]==0)return;key=pressed[vk];pressed[vk]=0;}
+        else if(action==1){if(pressed[vk]!=0)return;pressed[vk]=key;}
+        else if(pressed[vk]==0)return;
+        ((KeyboardInvoker)c.keyboard).bridgeKey(c.getWindow().getHandle(),key,0,action,mods);
     }
-    void release() {
-        releaseFlight();
-        flyKey = false;
-        if (!initialized)
-            return;
-        var c = MinecraftClient.getInstance();
-        if (c == null || c.getWindow() == null)
-            return;
-        long w = c.getWindow().getHandle();
-        for (int vk = 8; vk < 256; ++vk)
-            if (pressed[vk] != 0) {
-                int key = pressed[vk];
-                pressed[vk] = 0;
-                if (key != GLFW.GLFW_KEY_UNKNOWN)
-                    ((KeyboardInvoker)c.keyboard).bridgeKey(w, key, 0, GLFW.GLFW_RELEASE, 0);
+    private void button(int code,int action,int mods){
+        int bit=1<<code;if(((buttons&bit)!=0)==(action!=0))return;
+        buttons=action!=0?buttons|bit:buttons&~bit;
+        var c=MinecraftClient.getInstance();
+        ((InputInvoker)c.mouse).bridgeButton(c.getWindow().getHandle(),code,action,mods);
+    }
+    void update(Protocol.State s){
+        var c=MinecraftClient.getInstance();
+        if(!NativeBridge.input(BridgeClient.handle(),events) || events.getLong(8)!=s.epoch() ||
+            !Protocol.fresh(NativeBridge.clockMs(),events.getLong(0)))return;
+        long next=events.getLong(16),nx=events.getLong(24),ny=events.getLong(32);
+        if(!initialized || epoch!=s.epoch()){
+            release();initialized=true;epoch=s.epoch();eventSequence=next;dx=nx;dy=ny;textSequence=s.textSequence();}
+        boolean input=(s.flags()&Protocol.EDIT)!=0 && (s.flags()&Protocol.MENU)==0;
+        try{replaying=true;
+            long first=Math.max(eventSequence,next-128);
+            if(next-eventSequence>128)releaseHeld();
+            for(long i=first;i<next;++i){
+                int at=40+(int)(i%128)*32,kind=events.getInt(at),code=events.getInt(at+4),action=events.getInt(at+8);
+                int mods=events.getInt(at+12);replayMods=mods;
+                if(!input)continue;
+                if(kind==1)key(code,action,mods);
+                else if(kind==2){if(c.currentScreen!=null)cursor(events.getFloat(at+16),events.getFloat(at+20));button(code,action,mods);}
+                else if(kind==3){if(c.currentScreen!=null)cursor(events.getFloat(at+16),events.getFloat(at+20));
+                    ((InputInvoker)c.mouse).bridgeScroll(c.getWindow().getHandle(),0,events.getInt(at+24)/120.0);}
             }
-        for (int i = 0; i < 3; ++i)
-            if ((buttons & (1 << i)) != 0)
-                ((InputInvoker)c.mouse).bridgeButton(w, i, GLFW.GLFW_RELEASE, 0);
-        buttons = 0;
-        initialized = false;
-        // Release any vanilla action whose press was consumed by the client tick.
-        if (c.options != null) {
-            c.options.attackKey.setPressed(false);
-            c.options.useKey.setPressed(false);
-        }
+            eventSequence=next;replayMods=-1;
+            int mods=(s.key(16)?1:0)|(s.key(17)?2:0)|(s.key(18)?4:0);
+            for(int vk=8;vk<256;++vk)key(vk,input && s.key(vk)?1:0,mods);
+            if(c.currentScreen==null)
+                for(int vk=8;vk<256;++vk){int key=glfwKey(vk);
+                    if(key!=GLFW.GLFW_KEY_UNKNOWN && !(vk>=160 && vk<=165) && !(vk>=118 && vk<=120))
+                        KeyBinding.setKeyPressed(InputUtil.Type.KEYSYM.createFromCode(key),pressed[vk]!=0);}
+            for(int b=0;b<3;++b)button(b,input && (s.buttons()&(1<<b))!=0?1:0,mods);
+            if(input && c.currentScreen!=null)cursor(s.mouseX(),s.mouseY());
+            long mx=nx-dx,my=ny-dy;dx=nx;dy=ny;
+            if(input && c.currentScreen==null && Math.abs(mx)<5000 && Math.abs(my)<5000)
+                ((InputInvoker)c.mouse).bridgeCursor(c.getWindow().getHandle(),c.mouse.getX()+mx,c.mouse.getY()+my);
+            if(s.textSequence()>=textSequence)
+                for(long i=Math.max(textSequence,s.textSequence()-8);i<s.textSequence();++i)
+                    if(input && c.currentScreen!=null){int cp=s.text()[(int)(i%8)];
+                        if(Character.isValidCodePoint(cp))((KeyboardInvoker)c.keyboard).bridgeChar(c.getWindow().getHandle(),cp,mods);}
+            textSequence=s.textSequence();
+        }finally{replaying=false;replayMods=-1;}
     }
-    private void releaseFlight() {
-        if (ownsFlight && flyingPlayer != null) {
-            flyingPlayer.getAbilities().flying = oldFlying;
-            flyingPlayer.sendAbilitiesUpdate();
-        }
-        ownsFlight = false; flyingPlayer = null;
-    }
+    private void releaseHeld(){for(int vk=8;vk<256;++vk)key(vk,0,0);for(int i=0;i<3;++i)button(i,0,0);}
+    void release(){if(!initialized)return;
+        try{replaying=true;releaseHeld();}finally{replaying=false;replayMods=-1;}initialized=false;}
 }

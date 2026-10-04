@@ -11,4 +11,6 @@
 - Player Draw bit and physics-module field research: https://github.com/ElaDiDu/Sekiro-Practice-CT/blob/main/Ela_Sekiro_Table.CT . Only interface facts are used; the table is not executed or distributed.
 - Native coordinate store, gravity field and in-air timer references: https://github.com/borgCode/SekiroTool (MIT, copyright 2025 Shilkey, Centz). Its license is included as SekiroTool-LICENSE.txt. The callback, full-register x64 detour, shared voxel feedback and collision solver are newly written for this project; trainer scripts are not executed.
 
+- Camera-interface research: Jim2point0's public Sekiro photo-mode table at https://framedsc.com/CheatTables/sekiro_photoModeUpdated.CT . The table was inspected, not executed or distributed. The final current-ChrCam adapter was independently located in the running local 1.06 code by read-only inspection. Native ray output argument ordering was checked against the engine's local call site. No dumped executable or decompiled game classes enter Git or releases.
+
 Minecraft and Sekiro are not bundled. No game textures, maps, skins, source or decompiled game classes are included. The optional development caches are excluded from Git and distribution.

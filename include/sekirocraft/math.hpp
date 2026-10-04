@@ -166,8 +166,8 @@ inline std::optional<Camera> cameraFromNativePose(const Mat4 &pose, std::array<f
     Vec3 eye{pose.at(3, 0), pose.at(3, 1), pose.at(3, 2)};
     float distance = length(eye - player);
     if (!finite(eye) || distance > 30 || distance < .05f || !std::isfinite(lens[0]) ||
-        !std::isfinite(lens[1]) || !std::isfinite(lens[2]) || !std::isfinite(lens[3]) || lens[0] < .2f ||
-        lens[0] > 2.8f || lens[1] < .7f || lens[1] > 4 || lens[2] <= 0 || lens[2] > 10 ||
+        !std::isfinite(lens[1]) || !std::isfinite(lens[2]) || !std::isfinite(lens[3]) || lens[0] < .025f ||
+        lens[0] > 3.05f || lens[1] < .7f || lens[1] > 4 || lens[2] <= 0 || lens[2] > 10 ||
         lens[3] <= lens[2] || lens[3] > 100000)
         return {};
     auto view = inverse(pose);

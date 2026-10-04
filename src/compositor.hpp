@@ -328,8 +328,17 @@ float4 overlay(Out i):SV_TARGET{return World.SampleLevel(Point,frameUV(i.uv),0);
         set(values.captureEye, {frameMeta_.eye[0], frameMeta_.eye[1], frameMeta_.eye[2]});
         basis({frameMeta_.forward[0], frameMeta_.forward[1], frameMeta_.forward[2]}, values.captureForward,
               values.captureRight, values.captureUp);
+        if(frameMeta_.flags&ExplicitYaw){
+            float yaw=std::bit_cast<float>(frameMeta_.reserved)*3.14159265358979323846f/180;
+            sc::Vec3 r{-std::cos(yaw),0,std::sin(yaw)},f{frameMeta_.forward[0],frameMeta_.forward[1],frameMeta_.forward[2]};
+            set(values.captureRight,r);set(values.captureUp,{f.y*r.z-f.z*r.y,f.z*r.x-f.x*r.z,f.x*r.y-f.y*r.x});
+        }
         set(values.currentEye, camera.eye);
         basis(camera.forward, values.currentForward, values.currentRight, values.currentUp);
+        if(auto pose=sc::inverse(camera.view)){
+            set(values.currentRight,{pose->at(0,0),pose->at(0,1),pose->at(0,2)});
+            set(values.currentUp,{pose->at(1,0),pose->at(1,1),pose->at(1,2)});
+        }
         values.mc[1] = 1 / std::tan(frameMeta_.fovY / 2);
         values.mc[0] = values.mc[1] / frameMeta_.aspect;
         values.mc[2] = frameMeta_.nearZ;

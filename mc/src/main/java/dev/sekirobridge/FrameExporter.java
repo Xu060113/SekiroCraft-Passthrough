@@ -14,6 +14,7 @@ public final class FrameExporter implements AutoCloseable {
     private static final class Slot {
         int pbo;
         long fence;
+        long captureSequence, capturedAt;
         int width, height;
         Protocol.State pose;
     }
@@ -22,6 +23,7 @@ public final class FrameExporter implements AutoCloseable {
     private SimpleFramebuffer scaled;
     private int width, height;
     private long sequence;
+    private long captured, lastPublishedCapture;
     public long published, dropped;
     private static final class GLState implements AutoCloseable {
         final int read = GL11.glGetInteger(GL30.GL_READ_FRAMEBUFFER_BINDING),
@@ -48,12 +50,19 @@ public final class FrameExporter implements AutoCloseable {
         }
     }
     private void poll() {
+        Slot newest=null;
+        for(var slot:slots)if(slot.fence!=0){
+            int r=GL32.glClientWaitSync(slot.fence,0,0);
+            if(r==GL32.GL_ALREADY_SIGNALED || r==GL32.GL_CONDITION_SATISFIED)
+                if(slot.captureSequence>lastPublishedCapture && (newest==null || slot.captureSequence>newest.captureSequence))newest=slot;
+        }
         for (var s : slots)
             if (s.fence != 0) {
                 int result = GL32.glClientWaitSync(s.fence, 0, 0); // zero timeout, never glFinish
                 if (result == GL32.GL_TIMEOUT_EXPIRED)
                     continue;
-                if (result != GL32.GL_WAIT_FAILED && BridgeClient.active() &&
+                if (s==newest && result != GL32.GL_WAIT_FAILED && BridgeClient.active() &&
+                    Protocol.fresh(NativeBridge.clockMs(),s.capturedAt) &&
                     s.pose.epoch() == BridgeClient.state().epoch()) {
                     GL15.glBindBuffer(GL21.GL_PIXEL_PACK_BUFFER, s.pbo);
                     ByteBuffer mapped = GL30.glMapBufferRange(
@@ -61,7 +70,7 @@ public final class FrameExporter implements AutoCloseable {
                     if (mapped != null) {
                         try {
                             if (NativeBridge.publish(BridgeClient.handle(),
-                                                     Protocol.metadata(s.pose, ++sequence, s.width, s.height),
+                                                     Protocol.metadata(s.pose, ++sequence, s.width, s.height,s.capturedAt),
                                                      mapped))
                                 published++;
                             else
@@ -73,6 +82,7 @@ public final class FrameExporter implements AutoCloseable {
                         dropped++;
                 }
                 GL32.glDeleteSync(s.fence);
+                lastPublishedCapture=Math.max(lastPublishedCapture,s.captureSequence);
                 s.fence = 0;
                 s.pose = null;
             }
@@ -106,7 +116,8 @@ public final class FrameExporter implements AutoCloseable {
             return;
         try (var restore = new GLState()) {
             poll();
-            var s = BridgeClient.state();
+            var s = BridgeClient.renderPose();
+            if(s==null)return;
             resize(s.width(), s.height());
             if (current != null) {
                 current.pose = null;
@@ -122,6 +133,7 @@ public final class FrameExporter implements AutoCloseable {
                 return;
             }
             current.pose = s;
+            current.captureSequence=++captured;current.capturedAt=NativeBridge.clockMs();
             current.width = width;
             current.height = height;
             var framebuffer = MinecraftClient.getInstance().getFramebuffer();

@@ -58,6 +58,14 @@ int main() {
         check(sc::input::stateHook<0>(&device, bytes.size(), bytes.data()) == S_OK && bytes[0] == 0,
               "ANSI mouse metadata capture");
         device.type = DI8DEVTYPE_JOYSTICK;
+        sc::input::mcOwner=true;
+        device.type=DI8DEVTYPE_MOUSE;
+        DIMOUSESTATE2 rawMouse{};
+        check(sc::input::stateHook<0>(&device,sizeof(rawMouse),&rawMouse)==S_OK && rawMouse.lX==0 &&
+            sc::input::mouseDx.load()==LONG(0x80808080) && sc::input::mouseDy.load()==LONG(0x80808080),
+            "MC receives relative counts before the native input is suppressed");
+        sc::input::mcOwner=false;
+        device.type = DI8DEVTYPE_JOYSTICK;
         check(sc::input::stateHook<0>(&device, bytes.size(), bytes.data()) == S_OK && bytes[0] == 0x80,
               "joystick preserved despite same buffer length");
         device.type = DI8DEVTYPE_KEYBOARD;
@@ -83,7 +91,7 @@ int main() {
         check(sc::input::dataHook<0>(&device, sizeof(events[0]), events, &count, 0) == DIERR_INPUTLOST &&
                   count == 4 && flushes == 1,
               "buffer acquisition error does not flush");
-        check(nativeCalls == 9, "every intercepted call forwards once, plus one peek-drain call");
+        check(nativeCalls == 10, "every intercepted call forwards once, plus one peek-drain call");
         sc::input::capture = false;
         response = S_OK;
         sc::input::mcEdit = true;
@@ -125,6 +133,16 @@ int main() {
                   keyboard[DIK_E] == 0x80 && keyboard[DIK_I] == 0x80,
               "flight movement isolated while other host keys remain");
         sc::input::flying = false;
+        sc::input::mcOwner=true;sc::input::capture=true;sc::input::mouseStateTick=0;
+        device.type=DI8DEVTYPE_MOUSE;
+        DIDEVICEOBJECTDATA relative[2]{};
+        relative[0].dwOfs=DIMOFS_X;relative[0].dwData=3;
+        relative[1].dwOfs=DIMOFS_Y;relative[1].dwData=DWORD(-2);
+        auto oldX=sc::input::mouseDx.load(),oldY=sc::input::mouseDy.load();count=2;
+        check(sc::input::dataHook<0>(&device,sizeof(relative[0]),relative,&count,DIGDD_PEEK)==S_OK &&
+            count==0 && sc::input::mouseDx.load()==oldX+3 && sc::input::mouseDy.load()==oldY-2,
+            "buffered-only mouse deltas forwarded before capture and peek drain");
+        sc::input::mcOwner=false;sc::input::capture=false;
         check(MH_Initialize() == MH_OK, "MinHook init");
         check(sc::input::install(), "real system DirectInput hook installation");
         // This creates system devices but never acquires, reads a user's keystroke,

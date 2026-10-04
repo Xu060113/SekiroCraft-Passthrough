@@ -9,10 +9,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(GameRenderer.class)
 public abstract class GameRendererMixin {
-    @Inject(method = "updateTargetedEntity(F)V", at = @At("RETURN"))
-    private void target(float tickDelta, CallbackInfo ci) {
-        dev.sekirobridge.InteractionRay.update();
-    }
     @Inject(method = "render", at = @At("HEAD"))
     private void begin(CallbackInfo ci) {
         BridgeClient.renderBegin();
@@ -37,7 +33,7 @@ public abstract class GameRendererMixin {
     private void projection(double fov, CallbackInfoReturnable<Matrix4f> cir) {
         if (BridgeClient.active()) {
             var s = BridgeClient.state();
-            cir.setReturnValue(new Matrix4f().setPerspective(s.fov(), s.aspect(), s.near() * s.scale(),
+            cir.setReturnValue(new Matrix4f().setPerspective(BridgeClient.projectionFov(fov), s.aspect(), s.near() * s.scale(),
                                                              s.far() * s.scale()));
         }
     }

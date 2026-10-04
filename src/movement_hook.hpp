@@ -2,6 +2,7 @@
 #include "MinHook.h"
 #include "sekirocraft/host.hpp"
 #include "../bridge/physics.hpp"
+#include "native_driver.hpp"
 #include <mutex>
 #include <atomic>
 
@@ -21,6 +22,7 @@ class NativeMovement {
     PhysicsChannel *channel_{};
     Control control_{};
     bool active_{};
+    NativeDriver *driver_{};
     PhysicsPacket packet_{};
     uintptr_t lastPhysics_{};
     sc::Vec3 last_{};
@@ -35,6 +37,7 @@ class NativeMovement {
     std::atomic<uint64_t> playerCalls{}, correctedMoves{}, flightMoves{};
     bool installed() const { return installed_; }
     bool canFly() const { return canFly_; }
+    void driver(NativeDriver &driver){driver_=&driver;}
     void initialize(uintptr_t base, PhysicsChannel &channel) {
         base_ = base; channel_ = &channel; instance_ = this;
         scMovementHandler = callback;
@@ -73,6 +76,17 @@ class NativeMovement {
         playerCalls.fetch_add(1, std::memory_order_relaxed);
         uint64_t now = GetTickCount64();
         if (!active_ || !fresh(now, control_.tickMs)) { releaseFlight(); lastPhysics_ = 0; return; }
+        if (driver_ && (control_.capabilities & mcOwnerCapability)) {
+            sc::Vec3 target{};
+            if (!driver_->target(target) || !canFly_ ||
+                !gravity_.acquire(physics+0x92d,1) || !noMove_.acquire(hero+0x1f40,128)) {
+                releaseFlight(); return;
+            }
+            candidate[0]=target.x;candidate[1]=target.y;candidate[2]=target.z;
+            float zero{};SIZE_T wrote{};
+            WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(physics+0x8d0),&zero,sizeof(zero),&wrote);
+            return;
+        }
         if (channel_) channel_->read(packet_); // Retain snapshot on a zero-wait lock miss.
         sc::Vec3 proposed{candidate[0], candidate[1], candidate[2]};
         if (!validPhysics(packet_) || packet_.epoch != control_.epoch || !fresh(now, packet_.tick) ||

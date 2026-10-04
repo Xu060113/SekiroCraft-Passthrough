@@ -33,4 +33,7 @@ public final class NativeBridge {
     public static native boolean status(long handle, int flags, long epoch);
     public static native long clockMs();
     public static native boolean physics(long handle, ByteBuffer packet);
+    public static native boolean input(long handle, ByteBuffer packet);
+    public static native boolean player(long handle, ByteBuffer packet);
+    public static native boolean terrain(long handle, ByteBuffer packet);
 }
