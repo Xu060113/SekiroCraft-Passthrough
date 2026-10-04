@@ -112,7 +112,7 @@ class Compositor {
 
   public:
     std::string error;
-    uint64_t submitted{};
+    uint64_t submitted{}, overlaySubmitted{};
     // A frame-driven native camera must use the same pose and projection as the
     // completed MC image. Reprojecting an older image cannot advance animated
     // entities, and translation exposes pixels that the old depth map never saw.
@@ -272,7 +272,8 @@ float4 overlay(Out i):SV_TARGET{return World.SampleLevel(Point,frameUV(i.uv),0);
         return true;
     }
     bool draw(ID3D11DeviceContext *c, ID3D11RenderTargetView *target, ID3D11DepthStencilView *source,
-              const sc::Camera &camera, float width, float height, bool reproject = true) {
+              const sc::Camera &camera, float width, float height, bool reproject = true,
+              bool includeOverlay = true) {
         if (!source || !sequence_ || !camera.valid)
             return false;
         if (!reproject && !matchesCamera(frameMeta_, camera)) {
@@ -407,14 +408,52 @@ float4 overlay(Out i):SV_TARGET{return World.SampleLevel(Point,frameUV(i.uv),0);
         ID3D11ShaderResourceView *views[]{t.worldView.Get(), t.depthView.Get(), hostDepthView_.Get()};
         c->PSSetShaderResources(0, 3, views);
         c->Draw(3, 0);
-        if (frameMeta_.flags & Overlay) {
+        if (includeOverlay && (frameMeta_.flags & Overlay)) {
             auto view = t.overlayView.Get();
             c->PSSetShaderResources(0, 1, &view);
             c->PSSetShader(overlayPS_.Get(), nullptr, 0);
             c->Draw(3, 0);
+            ++overlaySubmitted;
         }
         ++submitted;
         error.clear();
+        return true;
+    }
+    // GUI pixels have no world position: a missing scene depth/camera pairing
+    // must not hide the inventory, crosshair or hotbar from an otherwise live peer.
+    bool drawOverlay(ID3D11DeviceContext *c, ID3D11RenderTargetView *target,
+                     float width, float height) {
+        if (!c || !target || !sequence_ || !(frameMeta_.flags & Overlay) ||
+            !std::isfinite(width) || !std::isfinite(height) || width <= 0 || height <= 0)
+            return false;
+        float values[44]{};
+        values[40] = frameMeta_.flags & BottomUp ? 1.f : 0.f;
+        PipelineState restore(c);
+        c->OMSetRenderTargets(1, &target, nullptr);
+        ID3D11ShaderResourceView *empty[3]{};
+        c->PSSetShaderResources(0, 3, empty);
+        c->UpdateSubresource(constants_.Get(), 0, nullptr, values, 0, 0);
+        c->OMSetBlendState(blend_.Get(), nullptr, 0xffffffff);
+        c->OMSetDepthStencilState(noDepth_.Get(), 0);
+        c->RSSetState(raster_.Get());
+        float w = std::min(width, height * frameMeta_.aspect), h = w / frameMeta_.aspect;
+        D3D11_VIEWPORT vp{(width - w) / 2, (height - h) / 2, w, h, 0, 1};
+        c->RSSetViewports(1, &vp);
+        c->IASetInputLayout(nullptr);
+        c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        c->VSSetShader(vs_.Get(), nullptr, 0);
+        c->PSSetShader(overlayPS_.Get(), nullptr, 0);
+        c->GSSetShader(nullptr, nullptr, 0);
+        c->HSSetShader(nullptr, nullptr, 0);
+        c->DSSetShader(nullptr, nullptr, 0);
+        auto cb = constants_.Get();
+        auto sampler = point_.Get();
+        auto view = ring_[current_].overlayView.Get();
+        c->PSSetConstantBuffers(0, 1, &cb);
+        c->PSSetSamplers(0, 1, &sampler);
+        c->PSSetShaderResources(0, 1, &view);
+        c->Draw(3, 0);
+        ++overlaySubmitted;
         return true;
     }
 };

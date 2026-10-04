@@ -107,6 +107,11 @@ struct App {
     bridge::LatestFrame latest;
     std::shared_ptr<bridge::Frame> renderFrame;
     std::shared_ptr<bridge::Frame> cameraFrame, sceneFrame;
+    bridge::DepthSnapshot sceneSnapshot;
+    std::shared_ptr<bridge::Frame> snapshotFrame;
+    sc::Camera snapshotCamera;
+    uint64_t snapshotAt=UINT64_MAX;
+    bool immediateDirty{};
     std::array<std::shared_ptr<bridge::Frame>,4> cameraHistory;
     sc::Camera sceneCamera;
     std::atomic<uint64_t> epoch{};
@@ -131,7 +136,8 @@ struct App {
     // A missed Finish boundary invalidates pending recordings instead of
     // attaching their draws to a later command list.
     std::atomic<uint64_t> recordingGeneration{1};
-    std::atomic<bool> sceneTrackingLost{};
+    std::atomic<uint64_t> unknownLists{}, finishBusy{}, clearBusy{}, executeBusy{};
+    uint64_t snapshotFailures{};
     uint64_t resourceEpoch=1, finishedLists{}, executedLists{};
     std::unordered_map<ID3D11DepthStencilView *, uint64_t> depthScores;
     std::set<std::pair<UINT, UINT>> observedDepthSizes;
@@ -151,6 +157,7 @@ struct App {
     RECT previousClip{};
     bridge::Control control;
     std::string status = "Waiting for Minecraft and a playable Sekiro scene.";
+    std::string worldReason = "Waiting for a completed world frame.", overlayReason;
     void cursor(bool on) {
         if (on == guiOwned)
             return;
@@ -275,7 +282,8 @@ struct App {
         if (GetTickCount64() - lastPeerLog > 5000) {
             lastPeerLog = GetTickCount64();
             sc::log("scene=" + std::to_string(scene) + " mc=" + std::to_string(mcStatus.load()) + " frames=" +
-                    std::to_string(compositor.submitted) + " peerBusy=" + std::to_string(statusBusy.load()) +
+                    std::to_string(compositor.submitted) + " hud=" + std::to_string(compositor.overlaySubmitted) +
+                    " peerBusy=" + std::to_string(statusBusy.load()) +
                     " presentBusy=" + std::to_string(skippedPresents.load()));
             sc::log("heroHidden=" + std::to_string(heroHidden) + " moveHook=" +
                     std::to_string(movement.installed()) + " playerCalls=" +
@@ -292,6 +300,14 @@ struct App {
                     " terrainSamples="+std::to_string(driver.terrainSamples.load())+
                     " mouseState="+std::to_string(sc::input::mouseStates.load())+
                     " mouseData="+std::to_string(sc::input::mouseData.load()));
+            sc::log("depth snapshots="+std::to_string(sceneSnapshot.captures)+
+                    " snapshotFailures="+std::to_string(snapshotFailures)+
+                    " unknownLists="+std::to_string(unknownLists.load())+
+                    " finishBusy="+std::to_string(finishBusy.load())+
+                    " clearBusy="+std::to_string(clearBusy.load())+
+                    " executeBusy="+std::to_string(executeBusy.load())+
+                    " world="+(worldReason.empty()?"ok":worldReason)+
+                    " hud="+(overlayReason.empty()?"ok":overlayReason));
         }
     }
     void hud() {
@@ -319,6 +335,8 @@ struct App {
                     (unsigned long long)driver.controlledMoves.load());
         ImGui::Text("Deferred recorded=%llu | submitted=%llu",(unsigned long long)finishedLists,
                     (unsigned long long)executedLists);
+        ImGui::Text("World=%llu | HUD=%llu | depth copies=%llu",(unsigned long long)compositor.submitted,
+                    (unsigned long long)compositor.overlaySubmitted,(unsigned long long)sceneSnapshot.captures);
         ImGui::Text("Native ground hits=%llu / 81 | mouse state/data=%llu/%llu",
             (unsigned long long)driver.terrainHits.load(),(unsigned long long)sc::input::mouseStates.load(),
             (unsigned long long)sc::input::mouseData.load());
@@ -448,6 +466,30 @@ void recordTargets(ID3D11DeviceContext *context, ID3D11DepthStencilView *dsv) {
         desc.SampleDesc.Count == 1 && std::abs(aspect - expectedAspect) < .03f)
         binding.depth = dsv;
 }
+bool captureSceneDepth(ID3D11DeviceContext *context) {
+    auto &a = *app;
+    if (!a.sceneDepth || !a.sceneFrame || a.depthFrame != a.frames ||
+        !bridge::Compositor::matchesCamera(a.sceneFrame->meta, a.sceneCamera))
+        return false;
+    if (!a.sceneSnapshot.capture(context, a.sceneDepth.Get())) {
+        ++a.snapshotFailures;
+        a.snapshotFrame.reset();
+        a.snapshotAt = UINT64_MAX;
+        a.worldReason = "The selected native depth could not be copied.";
+        return false;
+    }
+    a.snapshotFrame = a.sceneFrame;
+    a.snapshotCamera = a.sceneCamera;
+    a.snapshotAt = a.frames;
+    return true;
+}
+void flushImmediateDepth(ID3D11DeviceContext *context) {
+    auto &a = *app;
+    if (a.immediateDirty && context->GetType() == D3D11_DEVICE_CONTEXT_IMMEDIATE) {
+        a.immediateDirty = false;
+        captureSceneDepth(context);
+    }
+}
 void submitSceneDraw(const bridge::SceneDraw &draw) {
     auto &a = *app;
     if (draw.clearsDepth) {
@@ -478,13 +520,23 @@ void STDMETHODCALLTYPE hookClearDepth(ID3D11DeviceContext *context, ID3D11DepthS
         return;
     }
     Flag flag;
+    bool tracked = (flags & D3D11_CLEAR_DEPTH) && depth && gameContext(context);
+    bool immediate = context->GetType() == D3D11_DEVICE_CONTEXT_IMMEDIATE;
+    if (tracked && immediate) {
+        std::unique_lock guard(appMutex, std::try_to_lock);
+        if (guard.owns_lock()) {
+            if (app->sceneDepth.Get() == depth)
+                flushImmediateDepth(context);
+        } else
+            app->clearBusy.fetch_add(1);
+    }
     originalClearDepth[I](context, depth, flags, value, stencil);
-    if (!(flags & D3D11_CLEAR_DEPTH) || !depth || !gameContext(context))
+    if (!tracked)
         return;
     std::unique_lock guard(appMutex, std::try_to_lock);
     if (!guard.owns_lock()) {
         app->recordingGeneration.fetch_add(1);
-        app->sceneTrackingLost = true;
+        app->clearBusy.fetch_add(1);
         return;
     }
     auto &a = *app;
@@ -498,7 +550,7 @@ void STDMETHODCALLTYPE hookClearDepth(ID3D11DeviceContext *context, ID3D11DepthS
     bridge::SceneDraw clear;
     clear.depth = depth;
     clear.clearsDepth = true;
-    if (context->GetType() == D3D11_DEVICE_CONTEXT_DEFERRED)
+    if (!immediate)
         a.recordings[context].record(a.recordingGeneration.load(), std::move(clear));
     else
         submitSceneDraw(clear);
@@ -543,8 +595,11 @@ void recordDraw(ID3D11DeviceContext *context, UINT count) {
     bridge::SceneDraw draw{bound.depth, bound.viewport, bound.camera, bound.frame, count};
     if (deferred)
         a.recordings[context].record(generation, std::move(draw));
-    else
+    else {
         submitSceneDraw(draw);
+        if (a.sceneDepth.Get() == draw.depth.Get())
+            a.immediateDirty = true;
+    }
 }
 template <int I>
 HRESULT STDMETHODCALLTYPE hookFinishCommands(ID3D11DeviceContext *context, BOOL restore,
@@ -560,6 +615,7 @@ HRESULT STDMETHODCALLTYPE hookFinishCommands(ID3D11DeviceContext *context, BOOL 
         std::unique_lock guard(appMutex, std::try_to_lock);
         if (!guard.owns_lock()) {
             app->recordingGeneration.fetch_add(1);
+            app->finishBusy.fetch_add(1);
             return result;
         }
         auto &a = *app;
@@ -598,26 +654,38 @@ void STDMETHODCALLTYPE hookExecuteCommands(ID3D11DeviceContext *context, ID3D11C
     // Keep metadata alive across the original call, but never hold appMutex
     // while a driver submits work or invokes internal context operations.
     auto captured = bridge::DeferredScene::read(list);
+    {
+        std::unique_lock guard(appMutex, std::try_to_lock);
+        if (guard.owns_lock())
+            flushImmediateDepth(context);
+    }
     originalExecuteCommands[I](context, list, restore);
     std::unique_lock guard(appMutex, std::try_to_lock);
     if (!guard.owns_lock()) {
-        app->sceneTrackingLost = true;
+        app->executeBusy.fetch_add(1);
         return;
     }
     auto &a = *app;
     if (!a.initialized || context->GetType() != D3D11_DEVICE_CONTEXT_IMMEDIATE)
         return;
+    a.immediateDirty = false;
     if (!restore)
         a.bindings.erase(context);
     ++a.executedLists;
     if (!captured || captured->resourceEpoch != a.resourceEpoch) {
-        // A missed Finish hook/Resize boundary has no reliable camera binding.
-        // Skip this present instead of reusing an unrelated old scene snapshot.
-        a.sceneTrackingLost = true;
+        // UI/postprocessing lists can be cached or unmarked. They cannot alter
+        // an earlier owned depth snapshot, and must not veto that known scene.
+        a.unknownLists.fetch_add(1);
         return;
     }
     for (const auto &draw : captured->draws)
         submitSceneDraw(draw);
+    // Several recorded batches may write one depth view. Copy once, after the
+    // whole command list has executed, and only when it wrote the final winner.
+    if (std::any_of(captured->draws.begin(), captured->draws.end(), [&](const auto &draw) {
+            return !draw.clearsDepth && draw.depth.Get() == a.sceneDepth.Get();
+        }))
+        captureSceneDepth(context);
 }
 template <int I>
 void STDMETHODCALLTYPE hookTargets(ID3D11DeviceContext *context, UINT count,
@@ -628,6 +696,9 @@ void STDMETHODCALLTYPE hookTargets(ID3D11DeviceContext *context, UINT count,
         if (!guard.owns_lock())
             return;
         Flag flag;
+        auto found = app->bindings.find(context);
+        if (found != app->bindings.end() && found->second.depth.Get() != depth)
+            flushImmediateDepth(context);
         recordTargets(context, depth);
     }
 }
@@ -642,6 +713,9 @@ void STDMETHODCALLTYPE hookTargetsUav(ID3D11DeviceContext *context, UINT count,
         if (!guard.owns_lock())
             return;
         Flag flag;
+        auto found = app->bindings.find(context);
+        if (found != app->bindings.end() && found->second.depth.Get() != depth)
+            flushImmediateDepth(context);
         recordTargets(context, depth);
     }
 }
@@ -657,6 +731,7 @@ void STDMETHODCALLTYPE hookViewports(ID3D11DeviceContext *context, UINT count, c
 template <int I>
 void STDMETHODCALLTYPE hookInstanced(ID3D11DeviceContext *context, UINT count, UINT instances, UINT start,
                                      INT base, UINT first) {
+    originalInstanced[I](context, count, instances, start, base, first);
     if (!inMod && ready) {
         std::unique_lock guard(appMutex, std::try_to_lock);
         if (guard.owns_lock()) {
@@ -665,10 +740,10 @@ void STDMETHODCALLTYPE hookInstanced(ID3D11DeviceContext *context, UINT count, U
             recordDraw(context, count);
         }
     }
-    originalInstanced[I](context, count, instances, start, base, first);
 }
 template <int I>
 void STDMETHODCALLTYPE hookDraw(ID3D11DeviceContext *context, UINT count, UINT start, INT base) {
+    originalDraw[I](context, count, start, base);
     if (!inMod && ready) {
         std::unique_lock guard(appMutex, std::try_to_lock);
         if (guard.owns_lock()) {
@@ -677,7 +752,6 @@ void STDMETHODCALLTYPE hookDraw(ID3D11DeviceContext *context, UINT count, UINT s
             recordDraw(context, count);
         }
     }
-    originalDraw[I](context, count, start, base);
 }
 HRESULT STDMETHODCALLTYPE hookPresent(IDXGISwapChain *swap, UINT interval, UINT flags) {
     if (inMod || !ready || flags & DXGI_PRESENT_TEST)
@@ -708,27 +782,56 @@ HRESULT STDMETHODCALLTYPE hookPresent(IDXGISwapChain *swap, UINT interval, UINT 
             a.width = d.Width;
             a.height = d.Height;
         }
+        flushImmediateDepth(a.context.Get());
         ImGui_ImplDX11_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
         a.update();
         a.latest.take(a.renderFrame);
         bool frameLocked=(a.control.capabilities&bridge::mcOwnerCapability)!=0;
-        const auto &f = frameLocked ? a.sceneFrame : a.renderFrame;
-        const auto &renderCamera = frameLocked ? a.sceneCamera : a.camera;
+        const auto &f = frameLocked ? a.snapshotFrame : a.renderFrame;
+        const auto &renderCamera = frameLocked ? a.snapshotCamera : a.camera;
+        auto *renderDepth = frameLocked ? a.sceneSnapshot.view() : a.sceneDepth.Get();
+        auto now = GetTickCount64();
+        auto currentFrame = [&](const auto &frame) {
+            return frame && frame->meta.epoch == a.epoch && bridge::fresh(now, frame->meta.tickMs) &&
+                   bridge::fresh(now, frame->meta.controlTickMs);
+        };
+        std::string commonReason;
+        if (!(a.control.flags & bridge::Scene)) commonReason = "Native scene is not ready.";
+        else if (!(a.control.flags & bridge::Focus)) commonReason = "Sekiro is not focused.";
+        else if (a.showMenu) commonReason = "Diagnostics menu is open.";
+        else if (!(a.mcStatus.load() & 1)) commonReason = "MC peer is not connected.";
         bool submitted = false;
-        if (f && f->meta.epoch == a.epoch && bridge::fresh(GetTickCount64(), f->meta.tickMs) &&
-            bridge::fresh(GetTickCount64(), f->meta.controlTickMs) &&
-            (!frameLocked || (a.depthFrame==a.frames && !a.sceneTrackingLost.load())) &&
-            (a.control.flags & (bridge::Scene | bridge::Focus)) == (bridge::Scene | bridge::Focus) &&
-            !a.showMenu && (a.mcStatus.load() & 1)) {
+        a.worldReason = commonReason;
+        if (a.worldReason.empty() && !currentFrame(f))
+            a.worldReason = "No fresh MC world frame with a matching native camera.";
+        if (a.worldReason.empty() && frameLocked && a.snapshotAt != a.frames)
+            a.worldReason = "No executed scene depth snapshot in this present.";
+        if (a.worldReason.empty() && !renderDepth)
+            a.worldReason = "Native depth snapshot is unavailable.";
+        if (a.worldReason.empty()) {
             if (a.compositor.upload(a.context.Get(), *f))
-                submitted = a.compositor.draw(a.context.Get(), a.target.Get(), a.sceneDepth.Get(), renderCamera,
-                                              float(a.width), float(a.height),!frameLocked);
-            a.status = submitted ? "Minecraft world and HUD composited with native scene depth."
-                                 : "Frame received; waiting for matching scene depth or camera.";
-        } else
-            a.status = "Waiting for a fresh MC frame. In MC: load a dedicated world and /sekirobridge on.";
+                submitted = a.compositor.draw(a.context.Get(), a.target.Get(), renderDepth, renderCamera,
+                                              float(a.width), float(a.height), !frameLocked, false);
+            if (!submitted)
+                a.worldReason = a.compositor.error.empty() ? "Native depth/camera validation failed."
+                                                           : a.compositor.error;
+        }
+        bool overlaySubmitted = false;
+        a.overlayReason = commonReason;
+        if (a.overlayReason.empty() && !currentFrame(a.renderFrame))
+            a.overlayReason = "No fresh MC HUD frame.";
+        if (a.overlayReason.empty()) {
+            if (a.compositor.upload(a.context.Get(), *a.renderFrame))
+                overlaySubmitted = a.compositor.drawOverlay(a.context.Get(), a.target.Get(), float(a.width), float(a.height));
+            if (!overlaySubmitted)
+                a.overlayReason = a.compositor.error.empty() ? "HUD upload/draw failed." : a.compositor.error;
+        }
+        a.status = submitted ? (overlaySubmitted ? "Minecraft world and HUD displayed."
+                                                : "Minecraft world displayed; HUD pending.")
+                             : (overlaySubmitted ? "HUD displayed; world pending: " + a.worldReason
+                                                 : "World: " + a.worldReason + " HUD: " + a.overlayReason);
         a.heroHidden = submitted && a.hideOriginal && a.host.avatarVisibility(true);
         if (!a.heroHidden) a.host.avatarVisibility(false);
         a.hud();
@@ -740,7 +843,7 @@ HRESULT STDMETHODCALLTYPE hookPresent(IDXGISwapChain *swap, UINT interval, UINT 
             ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
         }
         ++a.frames;
-        a.sceneTrackingLost=false;
+        a.immediateDirty=false;
         a.sceneFrame.reset();a.sceneCamera={};
         a.depthScores.clear();
         a.bestDepthScore = 0;
@@ -784,7 +887,8 @@ HRESULT STDMETHODCALLTYPE hookResize(IDXGISwapChain *swap, UINT count, UINT widt
         a.recordings.clear();
         a.recordingGeneration.fetch_add(1);
         ++a.resourceEpoch;
-        a.sceneTrackingLost=false;
+        a.sceneSnapshot.reset();a.snapshotFrame.reset();a.snapshotCamera={};
+        a.snapshotAt=UINT64_MAX;a.immediateDirty=false;
         a.depthScores.clear();
         a.latest.store(nullptr);
         a.renderFrame.reset();

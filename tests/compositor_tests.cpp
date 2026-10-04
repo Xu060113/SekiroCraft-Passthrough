@@ -296,5 +296,49 @@ int main() {
     abandoned.record(4, bridge::SceneDraw{dsv, viewport, camera, {}, 150});
     require(abandoned.draws.size() == 1 && abandoned.draws[0].score == 150,
             "missed finish boundary cannot merge the old recording into a later command list");
+    bridge::DepthSnapshot fixedDepth;
+    c->ExecuteCommandList(secondList.Get(), TRUE);
+    require(fixedDepth.capture(c.Get(), dsv.Get()) && fixedDepth.captures == 1,
+            "production helper copies an executed scene depth into an owned snapshot");
+    require(!fixedDepth.capture(deferred.Get(), dsv.Get()),
+            "depth snapshots cannot be copied during deferred recording");
+    auto renderFixedDepth = [&](bool visible) {
+        require(renderer.upload(c.Get(), paired), "restore the paired frame for fixed-depth checks");
+        c->ClearRenderTargetView(target.Get(), blue);
+        require(renderer.draw(c.Get(), target.Get(), fixedDepth.view(), camera, 32, 32, false),
+                "render from the captured immutable scene depth");
+        auto fixedPixel = read(7, 16);
+        require(visible ? fixedPixel[0] > 250 && fixedPixel[2] < 5
+                        : fixedPixel[2] > 250 && fixedPixel[0] < 5,
+                "captured depth keeps the expected block occlusion");
+    };
+    // The game can record next-frame clears while Present holds its state lock.
+    // Recording is not execution and cannot invalidate the current snapshot.
+    deferred->ClearDepthStencilView(dsv.Get(), D3D11_CLEAR_DEPTH,
+                                    camera.projection.at(2, 2) + camera.projection.at(3, 2) / 2, 0);
+    renderFixedDepth(true);
+    ComPtr<ID3D11CommandList> unknownList;
+    require(SUCCEEDED(deferred->FinishCommandList(FALSE, &unknownList)), "finish unmarked native command list");
+    require(!bridge::DeferredScene::read(unknownList.Get()), "unmarked command list is reported as unknown");
+    c->ExecuteCommandList(unknownList.Get(), TRUE);
+    renderFixedDepth(true);
+    c->ClearRenderTargetView(target.Get(), blue);
+    require(renderer.draw(c.Get(), target.Get(), dsv.Get(), camera, 32, 32, false),
+            "read original depth after the unknown native command executes");
+    pixel = read(7, 16);
+    require(pixel[2] > 250 && pixel[0] < 5,
+            "unknown list changed original native depth but not the owned scene snapshot");
+    ComPtr<ID3D11CommandList> emptyList;
+    require(SUCCEEDED(deferred->FinishCommandList(FALSE, &emptyList)) &&
+                bridge::DeferredScene::attach(emptyList.Get(), 7, {}),
+            "empty UI command list has an empty recording");
+    c->ExecuteCommandList(emptyList.Get(), TRUE);
+    renderFixedDepth(true);
+    require(fixedDepth.captures == 1, "unknown and empty lists require no repeated depth copy");
+    require(fixedDepth.capture(c.Get(), dsv.Get()) && fixedDepth.captures == 2,
+            "the next known scene replaces the owned depth snapshot");
+    renderFixedDepth(false);
+    fixedDepth.reset();
+    require(!fixedDepth.view(), "resize releases the owned depth snapshot view");
     std::cout << checks << " D3D11 composite checks passed\n";
 }

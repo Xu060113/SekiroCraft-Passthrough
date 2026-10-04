@@ -38,6 +38,10 @@ if(!$SkipTests){
     if($LASTEXITCODE){throw 'Compositor test build failed'}
     & "$buildRoot\compositor_tests.exe"
     if($LASTEXITCODE){throw 'Compositor tests failed'}
+    & $cpp @common "$projectRoot\tests\overlay_tests.cpp" '-ld3d11' '-ldxgi' '-ld3dcompiler' '-o' "$buildRoot\overlay_tests.exe"
+    if($LASTEXITCODE){throw 'Independent HUD test build failed'}
+    & "$buildRoot\overlay_tests.exe"
+    if($LASTEXITCODE){throw 'Independent HUD checks failed'}
     & $cpp @common "$projectRoot\tests\input_tests.cpp" @objects '-ldxguid' '-o' "$buildRoot\input_tests.exe"
     if($LASTEXITCODE){throw 'Input fixture build failed'}
     & "$buildRoot\input_tests.exe"
