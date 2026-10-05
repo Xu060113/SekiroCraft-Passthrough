@@ -184,8 +184,9 @@ int main(int argc, char **argv) {
     require(handoff.update(4000,finisher,true),"long finisher remains native until animation ends");
     require(handoff.update(4016,idle,true) && !handoff.update(4032,idle,true),"control returns within two samples without a 6.5s minimum");
     handoff.begin(5000,idle);require(!handoff.update(5500,idle,true),"rejected request does not freeze MC for seconds");
-    handoff.begin(5600,idle);require(handoff.update(6600,idle,true,false,true),"held grapple allows native run/jump before animation confirmation");
-    require(!handoff.update(7100,idle,true),"unconfirmed traversal releases after key-up");
+    handoff.begin(5600,idle,true);
+    require(handoff.grapple() && !handoff.rootMotion(),"M request does not take MC movement before a wire animation starts");
+    require(!handoff.update(6100,idle,true),"rejected M request cannot retain input ownership");
     handoff.begin(6000,idle);require(!handoff.update(6016,finisher,false),"death/focus loss releases handoff");
     handoff.begin(7000,idle);require(!handoff.update(28000,finisher,true),"stuck action has bounded ownership");
     handoff.begin(29000,idle);auto respawn=finisher;respawn.hero=101;
@@ -206,6 +207,21 @@ int main(int argc, char **argv) {
     require(handoff.update(97000,transition,true) && handoff.update(97016,groundIdle,true) &&
             handoff.update(97032,transition,true) && handoff.update(97048,groundIdle,true) &&
             !handoff.update(97064,groundIdle,true),"transient idle cannot interrupt the remaining native animation");
+    handoff.begin(98000,groundIdle,true);auto wire=groundIdle;wire.id=202000;
+    require(handoff.update(98016,wire,true) && handoff.rootMotion(),"observed grapple launch enables only native wire translation");
+    wire.id=202012;require(handoff.update(98500,wire,true),"observed wire pull retains its native position");
+    wire.id=202035;require(handoff.update(100000,wire,true),"wire arrival remains in the grapple family");
+    require(handoff.update(100016,idle,true) && !handoff.update(100032,idle,true) && !handoff.rootMotion(),
+        "recorded grapple return to animation zero releases immediately instead of waiting twenty seconds");
+    handoff.begin(101000,groundIdle,true);wire.id=201001;handoff.update(101016,wire,true);
+    wire.id=201040;handoff.update(102000,wire,true);auto fall=idle;fall.id=400;
+    require(handoff.update(102016,fall,true),"first wire exit sample can be transient");
+    fall.id=600;require(!handoff.update(102032,fall,true),"fall/run exit returns MC control even without grounded idle");
+    handoff.begin(103000,idle,true);fall.id=600;
+    require(handoff.update(103016,fall,true) && !handoff.confirmed() && !handoff.update(103500,fall,true),
+        "ordinary MC jump/fall is not mistaken for a grapple");
+    handoff.begin(104000,idle,true);wire.id=202000;handoff.update(104016,wire,true);
+    require(!handoff.begin(105000,idle,true) && !handoff.update(112001,wire,true),"held/repeated M never renews a stuck grapple watchdog");
     bridge::FrameMeta guiMeta;guiMeta.aspect=16.f/9;guiMeta.guiGeneration=8;
     auto guiDisplay=bridge::GuiDisplay::fit(guiMeta,1920,1200,100);
     auto guiCenter=guiDisplay.point(640,400,1280,800);

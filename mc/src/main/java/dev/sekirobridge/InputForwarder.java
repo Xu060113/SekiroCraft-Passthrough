@@ -141,8 +141,9 @@ public final class InputForwarder {
         if(!initialized || epoch!=s.epoch()){
             release();initialized=true;epoch=s.epoch();eventSequence=next;dx=nx;dy=ny;textSequence=s.textSequence();pointerEventTick=0;}
         boolean input=(s.flags()&Protocol.EDIT)!=0 && (s.flags()&(Protocol.MENU|Protocol.NATIVE_UI))==0;
+        boolean lookInput=input;
         boolean nativeAction=(s.flags()&Protocol.NATIVE_ACTION)!=0 && !target.screenOpen();
-        if(nativeAction)input=false;
+        if(nativeAction && (s.flags()&Protocol.NATIVE_GRAPPLE)==0)input=false;
         try{replaying=true;
             Object screen=target.screenIdentity();long geometry=target.cursorGeometry();
             if(screen!=inputScreen || geometry!=inputGeometry){
@@ -153,7 +154,7 @@ public final class InputForwarder {
             else if(!inputEnabled){
                 // Restore held movement/modifier levels after focus or F8. Do not
                 // turn a sampled button/key level into a second click/action.
-                for(int vk=8;vk<256;++vk)if(forwardedKey(vk) && s.key(vk) && (target.screenOpen() || (vk!='G' && vk!='R'))){
+                for(int vk=8;vk<256;++vk)if(forwardedKey(vk) && s.key(vk) && (target.screenOpen() || (vk!='M' && vk!='R'))){
                     int key=glfwKey(vk);if(key!=GLFW.GLFW_KEY_UNKNOWN)pressed[vk]=key;}
             }
             inputEnabled=input;
@@ -165,7 +166,7 @@ public final class InputForwarder {
                 if(!input)continue;
                 long stamp=events.getLong(at+32),generation=events.getLong(at+40);
                 boolean pointerMatches=target.screenOpen() && generation!=0 && generation==target.guiGeneration() && Protocol.fresh(now,stamp);
-                if(kind==1){if(!target.screenOpen() && (code=='G' || code=='R'))continue;key(code,action,mods);}
+                if(kind==1){if(!target.screenOpen() && (code=='M' || code=='R'))continue;key(code,action,mods);}
                 else if(kind==2){pointerEventTick=Math.max(pointerEventTick,stamp);
                     if(target.screenOpen()){
                         float x=events.getFloat(at+16),y=events.getFloat(at+20);
@@ -198,7 +199,9 @@ public final class InputForwarder {
                 cursor(events.getFloat(40),events.getFloat(44));
             if(!target.screenOpen())pointerValid=false;
             long mx=nx-dx,my=ny-dy;dx=nx;dy=ny;
-            if(input && !target.screenOpen() && Math.abs(mx)<5000 && Math.abs(my)<5000)target.motion(mx,my);
+            // Native translation never owns Minecraft's camera. Continue consuming
+            // look deltas throughout a grapple, including its exit handshake.
+            if(lookInput && !target.screenOpen() && Math.abs(mx)<5000 && Math.abs(my)<5000)target.motion(mx,my);
             if(s.textSequence()>=textSequence)
                 for(long i=Math.max(textSequence,s.textSequence()-8);i<s.textSequence();++i)
                     if(input && target.screenOpen()){int cp=s.text()[(int)(i%8)];

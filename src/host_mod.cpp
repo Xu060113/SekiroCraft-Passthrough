@@ -170,7 +170,6 @@ struct App {
     RECT previousClip{};
     bridge::Control control;
     bridge::ActionHandoff action;
-    uint64_t traversalStarted{};
     uint64_t actionRequestSeen{},actionRequestTick{};
     std::string status = "Waiting for Minecraft and a playable Sekiro scene.";
     std::string worldReason = "Waiting for a completed world frame.", overlayReason;
@@ -229,10 +228,7 @@ struct App {
                      movement.canFly() && (mcStatus.load() & 8)!=0;
         bool actionAllowed=mcOwner && focused && edit && !showMenu && !nativeUI;
         bool gameplay=actionAllowed && !dead && !(mcStatus.load()&2);
-        auto grappleKey=sc::input::grappleVk.load();
-        bool grappleAlias=pressed('G');
-        bool grappleBound=grappleKey!='G' && pressed(int(grappleKey));
-        bool grapple=grappleAlias || grappleBound,attack=pressed('R');
+        bool grapple=pressed('M'),attack=pressed('R');
         bridge::NativeActionRequest request;
         bool requested=memory.nativeAction.read(request) && bridge::validAction(request) &&
             request.epoch==epoch && bridge::fresh(GetTickCount64(),request.tick) &&
@@ -240,25 +236,16 @@ struct App {
         if(requested){actionRequestSeen=request.sequence;actionRequestTick=request.tick;}
         auto now=GetTickCount64();
         auto animation=bridge::readNativeAnimation(host.base());
-        bool traversalHeld=gameplay && ((GetAsyncKeyState('G')&0x8000) || (GetAsyncKeyState(int(grappleKey))&0x8000));
-        if(traversalHeld && !action.active())action.begin(now,animation);
         if((gameplay && (grapple || attack)) || (actionAllowed && dead && (attack || requested))){
-            bool accepted=dead || action.begin(now,animation);
+            bool accepted=dead || action.begin(now,animation,grapple && !attack);
             if(accepted && (attack || requested))sc::input::attackUntil=now+180;
             if(accepted && grapple)sc::input::grappleUntil=now+180;
         }
-        if(traversalHeld){
-            if(!traversalStarted)traversalStarted=now;
-            // The native action may only become eligible after gravity/ground
-            // state resumes or a jump reaches a hook point. Supply new edges,
-            // rather than one indefinitely-held press rejected on entry.
-            sc::input::grappleUntil=(now-traversalStarted)%300<180?now+80:0;
-        }else traversalStarted=0;
-        bool handoff=action.update(now,animation,mcOwner && focused && !dead,nativeUI || showMenu,traversalHeld);
+        action.update(now,animation,mcOwner && focused && !dead,nativeUI || showMenu);
+        bool handoff=action.rootMotion();
         combatTrace.animation(animation,(handoff?1u:0u)|(action.confirmed()?2u:0u)|(attack?4u:0u)|
             (grapple?8u:0u)|(nativeUI?16u:0u)|(mcOwner?32u:0u));
-        sc::input::nativeKeys=actionAllowed && (dead || handoff);
-        sc::input::nativeTraversal=actionAllowed && handoff && (traversalHeld || sc::input::grappleHeld());
+        sc::input::nativeKeys=actionAllowed && (dead || action.active());
         if(!sc::input::nativeKeys){sc::input::attackUntil=0;sc::input::grappleUntil=0;}
         sc::input::mcOwner=mcOwner && focused;
         sc::input::capture = capturing || (mcOwner && focused && edit && !nativeUI);
@@ -275,7 +262,8 @@ struct App {
         control.flags = (scene ? bridge::Scene : 0) | (focused ? bridge::Focus : 0) |
                         (edit && !nativeUI ? bridge::Edit : 0) |
                         (showMenu ? bridge::Menu : 0) | (dead ? bridge::NativeDead : 0) |
-                        (handoff ? bridge::NativeAction : 0) | (nativeUI?bridge::NativeUI:0);
+                        (handoff ? bridge::NativeAction : 0) | (nativeUI?bridge::NativeUI:0) |
+                        (action.active() && action.grapple()?bridge::NativeGrapple:0);
         control.capabilities = 7 | (playerFeatures && movement.installed() ? bridge::constraintCapability : 0) |
                                (playerFeatures && movement.canFly() ? bridge::flightCapability : 0);
         if(playerFeatures && driver.ready() && movement.installed() && movement.canFly())
@@ -392,8 +380,8 @@ struct App {
         ImGui::Text("F6 Sekiro UI / MC | F7 diagnostics / F8 input pause / F9 test block");
         auto animation=bridge::readNativeAnimation(host.base());
         ImGui::Text("Native animation=%d valid=%d | action=%d confirmed=%d",animation.id,animation.valid,action.active(),action.confirmed());
-        ImGui::Text("G / %c: grapple (Sekiro binding: %c) | R: attack / deathblow / resurrection",
-                    int(sc::input::grappleVk.load()),int(sc::input::grappleVk.load()));
+        ImGui::Text("M: grapple only (Sekiro binding: %c) | R: attack / deathblow / resurrection",
+                    int(sc::input::grappleVk.load()));
         ImGui::Text("Sekiro: %s | camera: %s | depth: %s", player.valid ? "loaded" : "not loaded",
                     camera.valid ? "live" : "missing", sceneDepth ? "captured" : "missing");
         ImGui::Text("MC: %s | composite frames: %llu",
@@ -1031,7 +1019,7 @@ DWORD WINAPI scBootstrap(void *) {
         app->hideOriginal = GetPrivateProfileIntW(L"SekiroBridge", L"hide_original", 1, config.c_str()) != 0;
         app->playerFeatures = GetPrivateProfileIntW(L"SekiroBridge", L"player_features", 1, config.c_str()) != 0;
         wchar_t grappleKey[8]{};
-        GetPrivateProfileStringW(L"SekiroBridge",L"grapple_key",L"G",grappleKey,8,config.c_str());
+        GetPrivateProfileStringW(L"SekiroBridge",L"grapple_key",L"M",grappleKey,8,config.c_str());
         if(grappleKey[0] && !grappleKey[1])sc::input::configureGrapple(grappleKey[0]);
         sc::log("Native grapple binding="+std::string(1,char(sc::input::grappleVk.load())));
         app->exportWidth =

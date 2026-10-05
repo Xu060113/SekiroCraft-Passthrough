@@ -107,8 +107,10 @@ class NativeMovement {
             // isolation. NoMove also interferes with native action eligibility;
             // allow the invisible hero's state machine to run while MC drives.
             noMove_.release();
+            bool pendingGrapple=(control_.flags&NativeGrapple)!=0;
+            if(pendingGrapple)gravity_.release();
             if (!have || !canFly_ ||
-                !gravity_.acquire(physics+0x92d,1)) {
+                (!pendingGrapple && !gravity_.acquire(physics+0x92d,1))) {
                 releaseFlight(); return;
             }
             candidate[0]=target.x;candidate[1]=target.y;candidate[2]=target.z;

@@ -25,8 +25,6 @@ HRESULT STDMETHODCALLTYPE state(void *, DWORD n, void *out) {
     return response;
 }
 HRESULT STDMETHODCALLTYPE zeroState(void *,DWORD n,void *out){std::memset(out,0,n);return S_OK;}
-HRESULT STDMETHODCALLTYPE traversalState(void *,DWORD n,void *out){std::memset(out,0,n);
-    if(n==256){auto keys=static_cast<uint8_t*>(out);keys[DIK_W]=keys[DIK_SPACE]=keys[DIK_E]=0x80;}return S_OK;}
 HRESULT STDMETHODCALLTYPE data(void *, DWORD, DIDEVICEOBJECTDATA *, DWORD *n, DWORD) {
     ++nativeCalls;
     if (SUCCEEDED(response) && n) {
@@ -172,22 +170,17 @@ int main() {
         count=4;sc::input::dataHook<0>(&device,sizeof(events[0]),events,&count,0);
         check(count==1 && events[0].dwOfs==DIK_M && events[0].dwData==0,"buffered M release on GUI entry");
         check(!sc::input::configureGrapple(L'!') && sc::input::grappleVk=='M',"invalid grapple configuration retains last valid key");
-        sc::input::nativeKeys=true;sc::input::nativeTraversal=true;sc::input::originalState[0]=state;
+        sc::input::nativeKeys=true;sc::input::originalState[0]=state;
+        sc::input::grappleUntil=GetTickCount64()+1000;
         sc::input::stateHook<0>(&device,keyboard.size(),keyboard.data());
-        check(keyboard[DIK_W]==0x80 && keyboard[DIK_SPACE]==0x80 && keyboard[DIK_E]==0,
-            "held native traversal forwards movement/jump while isolating MC inventory");
-        sc::input::nativeTraversal=false;sc::input::stateHook<0>(&device,keyboard.size(),keyboard.data());
-        check(keyboard[DIK_W]==0 && keyboard[DIK_SPACE]==0,"traversal release isolates native movement again");
-        sc::input::grappleUntil=0;sc::input::nativeTraversal=true;sc::input::originalState[0]=traversalState;
-        std::array<DIDEVICEOBJECTDATA,16> traversalEvents{};count=16;
-        sc::input::dataHook<0>(&device,sizeof(traversalEvents[0]),traversalEvents.data(),&count,0);
-        check(count==2 && traversalEvents[0].dwOfs==DIK_W && traversalEvents[1].dwOfs==DIK_SPACE,
-            "buffered-only traversal emits movement/jump without inventory events");
-        sc::input::nativeKeys=false;count=16;
-        sc::input::dataHook<0>(&device,sizeof(traversalEvents[0]),traversalEvents.data(),&count,0);
-        check(count==2 && traversalEvents[0].dwData==0 && traversalEvents[1].dwData==0,
-            "GUI interruption releases buffered traversal movement and jump");
-        sc::input::nativeTraversal=false;sc::input::originalState[0]=state;
+        check(keyboard[DIK_M]==0x80 && keyboard[DIK_W]==0 && keyboard[DIK_SPACE]==0 && keyboard[DIK_LSHIFT]==0,
+            "M-only grapple never forwards native movement, jump or sprint");
+        count=4;sc::input::dataHook<0>(&device,sizeof(events[0]),events,&count,0);
+        check(count==1 && events[0].dwOfs==DIK_M && events[0].dwData==0x80,
+            "buffered M-only grapple emits only its action key despite held movement");
+        sc::input::nativeKeys=false;count=4;sc::input::dataHook<0>(&device,sizeof(events[0]),events,&count,0);
+        check(count==1 && events[0].dwOfs==DIK_M && events[0].dwData==0,
+            "grapple interruption releases only M without native movement events");
         sc::input::grappleUntil=0;sc::input::configureGrapple(L'G');sc::input::nativeKeys=true;
         sc::input::originalState[0]=state;
         device.type=DI8DEVTYPE_MOUSE;sc::input::attackUntil=GetTickCount64()+1000;

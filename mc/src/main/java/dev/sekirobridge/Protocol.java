@@ -5,7 +5,7 @@ import java.nio.ByteOrder;
 
 public final class Protocol {
     public static final int CONTROL_BYTES = 200, META_BYTES = 112, INPUT_BYTES=6208, INPUT_HEADER=64, INPUT_EVENT=48, MAX_WIDTH = 1920, MAX_HEIGHT = 1080;
-    public static final int SCENE = 1, FOCUS = 2, EDIT = 4, MENU = 8, NATIVE_DEAD = 32, NATIVE_ACTION = 64, NATIVE_UI=128;
+    public static final int SCENE = 1, FOCUS = 2, EDIT = 4, MENU = 8, NATIVE_DEAD = 32, NATIVE_ACTION = 64, NATIVE_UI=128, NATIVE_GRAPPLE=256;
     public record State(long sequence, long tickMs, long epoch, int flags, int capabilities, float px,
                         float py, float pz, float ex, float ey, float ez, float fx, float fy, float fz,
                         float fov, float aspect, float near, float far, float yOffset, float scale, int width,

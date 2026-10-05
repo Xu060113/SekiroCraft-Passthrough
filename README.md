@@ -50,7 +50,7 @@ MC 的视野设置、疾跑及望远镜缩放继续计算，实际世界视野�
 
 ### 死亡、钩爪、忍杀和投射物修复
 
-`gameplay3-life-actions-projectiles` 保留 MC 死亡界面点击，并在只狼真正复活后自动复活 MC、丢弃旧生命的伤害数据。`sekirobridge.ini` 的 `grapple_key` 与只狼实际钩爪键位对应（字母 A–Z）；MC 模式按该键或 **G** 发出钩爪请求。用户当前使用 **M**，安装时使用 `-NativeGrappleKey M`。**R** 发送只狼默认左键攻击／红点忍杀／复活输入。原生动作结束返回已观察的地面待机状态即可归还 MC 移动，不再要求返回 MC 控制时的动画 0；原生 Boss 忍杀仍需要实测验收。交接期间仍隐藏狼模型，不适配史蒂夫忍杀动作。
+`gameplay3-life-actions-projectiles` 保留 MC 死亡界面点击，并在只狼真正复活后自动复活 MC、丢弃旧生命的伤害数据。`sekirobridge.ini` 的 `grapple_key` 与只狼实际钩爪键位对应（字母 A–Z）；MC 模式只按 **M** 发出钩爪请求，G 不参与原生动作；WASD、跑步、跳跃和鼠标继续由 MC 处理。用户当前使用 **M**，安装时使用 `-NativeGrappleKey M`。**R** 发送只狼默认左键攻击／红点忍杀／复活输入。原生动作结束返回已观察的地面待机状态即可归还 MC 移动，不再要求返回 MC 控制时的动画 0；原生 Boss 忍杀仍需要实测验收。交接期间仍隐藏狼模型，不适配史蒂夫忍杀动作。
 
 赤鬼修复候选改用实机记录的正常地面刀击参数 5000010，补齐反应选择器，并取消 MC 位置同步对原生 NoMove 的占用。离线夹具不能证明赤鬼已出现红点，定向验证见 [OGRE_GRAPPLE_TEST.md](docs/OGRE_GRAPPLE_TEST.md)。
 
@@ -73,4 +73,4 @@ MC 的视野设置、疾跑及望远镜缩放继续计算，实际世界视野�
 
 结合 [universal-modder 的 Minecraft/GTA5 passthrough 示例](https://github.com/rehan-remade/universal-modder/tree/main/examples/minecraft-gta5-passthrough) 的分层传输与 [SkyCraft](https://github.com/chasmlol/SkyCraft) 的 MC 物理/碰撞就绪管理。通信使用 Win32 共享内存及自有 JNI，合成使用本项目 D3D11 hook。代码独立适配 MC 1.20.1 和只狼，未复制参考项目源文件，也不分发游戏资源。**SkyCraft 式的 MC 网格原生渲染、完整原生碰撞尚未移植**；具体采用的部分和边界见 [参考实现对照](docs/REFERENCE_DESIGN.md)。
 
-本次 HP 自动阶段、按住 G/M 原生钩索跑图与生物蛋修复见 [定向验收](docs/HP_STAGE_TRAVERSAL_TEST.md)。自动扣红点是简化结算，特殊剧情阶段和最终奖励仍待实机验收。
+本次 HP 自动阶段、M 专用钩索与生物蛋修复见 [定向验收](docs/HP_STAGE_TRAVERSAL_TEST.md)。自动扣红点是简化结算，特殊剧情阶段和最终奖励仍待实机验收。

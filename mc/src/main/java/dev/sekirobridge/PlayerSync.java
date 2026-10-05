@@ -41,7 +41,10 @@ final class PlayerSync {
         }
         boolean handoff=(s.flags()&(Protocol.NATIVE_ACTION|Protocol.NATIVE_DEAD|Protocol.NATIVE_UI))!=0;
         if(handoff || serverHandoff){
-            p.teleport(p.getServerWorld(),s.mcX(s.px()),s.mcY(s.py()),s.mcZ(s.pz()),p.getYaw(),p.getPitch());
+            // The server's last received yaw may lag the live client camera.
+            // Absolute position + zero relative rotation preserves that camera.
+            p.networkHandler.requestTeleport(s.mcX(s.px()),s.mcY(s.py()),s.mcZ(s.pz()),0,0,
+                net.minecraft.network.packet.s2c.play.PositionFlag.ROT);
             p.setVelocity(Vec3d.ZERO);p.fallDistance=0;
         }
         serverHandoff=handoff;
