@@ -11,7 +11,9 @@ struct NativeAnimation {
     uintptr_t hero{},module{};int32_t id{};bool valid{};
 };
 // A request is confirmed by the current animation leaving its pre-action state.
-// Returning to that state releases authority, independent of held keys or motion.
+// MC ownership can leave animation 0 as the baseline. Native actions may instead
+// return to a grounded idle, so completion must not require that exact baseline.
+inline bool nativeGroundIdle(int32_t id){return id==100321 || id==790010;}
 class ActionHandoff {
     uint64_t started_{},sampleAt_{};NativeAnimation baseline_{};bool confirmed_{};unsigned idleSamples_{};
   public:
@@ -28,7 +30,8 @@ class ActionHandoff {
         if(now<sampleAt_){reset();return false;}
         if(paused){started_+=now-sampleAt_;sampleAt_=now;return true;}
         sampleAt_=now;
-        if(animation.id!=baseline_.id){confirmed_=true;idleSamples_=0;}
+        bool idle=animation.id==baseline_.id || nativeGroundIdle(animation.id);
+        if(!idle){confirmed_=true;idleSamples_=0;}
         else if(confirmed_ && ++idleSamples_>=2){reset();return false;}
         if(now<started_ || now-started_>20000 || (!confirmed_ && now-started_>=500)){reset();return false;}
         return true;

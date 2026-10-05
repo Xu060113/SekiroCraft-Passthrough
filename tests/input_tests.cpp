@@ -147,8 +147,8 @@ int main() {
         sc::input::capture=true;sc::input::nativeKeys=true;
         device.type=DI8DEVTYPE_KEYBOARD;
         sc::input::stateHook<0>(&device,keyboard.size(),keyboard.data());
-        check(keyboard[DIK_G]==0x80 && keyboard[DIK_W]==0 && keyboard[DIK_E]==0,
-            "grapple key alone reaches native controls during handoff");
+        check(keyboard[DIK_G]==0 && keyboard[DIK_W]==0 && keyboard[DIK_E]==0,
+            "a native action does not leak physical keys without a grapple request");
         sc::input::originalState[0]=zeroState;sc::input::grappleUntil=GetTickCount64()+1000;
         sc::input::stateHook<0>(&device,keyboard.size(),keyboard.data());
         check(keyboard[DIK_G]==0x80 && keyboard[DIK_W]==0,"message-only fast grapple tap survives release before native poll");
@@ -156,6 +156,21 @@ int main() {
         check(count==1 && events[0].dwOfs==DIK_G && events[0].dwData==0x80,"buffered grapple tap down");
         sc::input::grappleUntil=0;count=4;sc::input::dataHook<0>(&device,sizeof(events[0]),events,&count,0);
         check(count==1 && events[0].dwData==0,"buffered grapple tap release");
+        check(sc::input::configureGrapple(L'm') && sc::input::grappleVk=='M' && sc::input::grappleScan==DIK_M,
+            "user M binding maps to the real DirectInput scan code");
+        sc::input::grappleUntil=GetTickCount64()+1000;
+        sc::input::stateHook<0>(&device,keyboard.size(),keyboard.data());
+        check(keyboard[DIK_M]==0x80 && keyboard[DIK_G]==0 && keyboard[DIK_E]==0,
+            "MC grapple request targets configured M instead of the old hardcoded G");
+        count=4;sc::input::dataHook<0>(&device,sizeof(events[0]),events,&count,0);
+        check(count==1 && events[0].dwOfs==DIK_M && events[0].dwData==0x80,"buffered M grapple down");
+        sc::input::nativeKeys=false;
+        sc::input::stateHook<0>(&device,keyboard.size(),keyboard.data());
+        check(keyboard[DIK_M]==0,"opening MC GUI suppresses even a pending mapped grapple pulse");
+        count=4;sc::input::dataHook<0>(&device,sizeof(events[0]),events,&count,0);
+        check(count==1 && events[0].dwOfs==DIK_M && events[0].dwData==0,"buffered M release on GUI entry");
+        check(!sc::input::configureGrapple(L'!') && sc::input::grappleVk=='M',"invalid grapple configuration retains last valid key");
+        sc::input::grappleUntil=0;sc::input::configureGrapple(L'G');sc::input::nativeKeys=true;
         sc::input::originalState[0]=state;
         device.type=DI8DEVTYPE_MOUSE;sc::input::attackUntil=GetTickCount64()+1000;
         sc::input::stateHook<0>(&device,sizeof(mouse),&mouse);

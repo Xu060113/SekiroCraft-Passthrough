@@ -192,6 +192,18 @@ int main(int argc, char **argv) {
     handoff.begin(31000,idle);handoff.update(31016,finisher,true);
     require(handoff.update(92000,finisher,true,true),"native menu pause does not consume the action watchdog");
     require(handoff.update(92016,idle,true) && !handoff.update(92032,idle,true),"closing a menu retains animation completion tracking");
+    auto groundIdle=idle;groundIdle.id=100321;
+    handoff.begin(93000,idle);handoff.update(93016,finisher,true);
+    require(handoff.update(94000,groundIdle,true) && !handoff.update(94016,groundIdle,true),
+            "MC baseline zero does not hold control when native action returns to grounded idle");
+    handoff.begin(95000,idle);
+    require(handoff.update(95016,groundIdle,true) && !handoff.confirmed() && !handoff.update(95500,groundIdle,true),
+            "release of movement suppression into idle cannot falsely confirm an attack");
+    handoff.begin(96000,idle);handoff.update(96016,finisher,true);
+    auto transition=groundIdle;transition.id=100311;
+    require(handoff.update(97000,transition,true) && handoff.update(97016,groundIdle,true) &&
+            handoff.update(97032,transition,true) && handoff.update(97048,groundIdle,true) &&
+            !handoff.update(97064,groundIdle,true),"transient idle cannot interrupt the remaining native animation");
     bridge::FrameMeta guiMeta;guiMeta.aspect=16.f/9;guiMeta.guiGeneration=8;
     auto guiDisplay=bridge::GuiDisplay::fit(guiMeta,1920,1200,100);
     auto guiCenter=guiDisplay.point(640,400,1280,800);

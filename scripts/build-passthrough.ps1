@@ -28,6 +28,7 @@ Copy-Item -LiteralPath "$projectRoot\docs\REFERENCE_DESIGN.md" -Destination "$pa
 Copy-Item -LiteralPath "$projectRoot\docs\GAMEPLAY_TEST.md" -Destination "$packageRoot\docs\GAMEPLAY_TEST.md" -Force
 Copy-Item -LiteralPath "$projectRoot\docs\COMBATFIX1_TEST.md" -Destination "$packageRoot\docs\COMBATFIX1_TEST.md" -Force
 Copy-Item -LiteralPath "$projectRoot\docs\GUI_NATIVE_COMBAT_TEST.md" -Destination "$packageRoot\docs\GUI_NATIVE_COMBAT_TEST.md" -Force
+Copy-Item -LiteralPath "$projectRoot\docs\OGRE_GRAPPLE_TEST.md" -Destination "$packageRoot\docs\OGRE_GRAPPLE_TEST.md" -Force
 Copy-Item -LiteralPath "$projectRoot\docs\NATIVE_COMBAT_TRACE.md" -Destination "$packageRoot\docs\NATIVE_COMBAT_TRACE.md" -Force
 Copy-Item -LiteralPath "$projectRoot\docs\LIFE_ACTION_PROJECTILE_TEST.md" -Destination "$packageRoot\docs\LIFE_ACTION_PROJECTILE_TEST.md" -Force
 Copy-Item -LiteralPath "$projectRoot\licenses\SekiroTool-LICENSE.txt" -Destination "$packageRoot\SekiroTool-LICENSE.txt" -Force

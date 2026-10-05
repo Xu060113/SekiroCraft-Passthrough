@@ -15,18 +15,27 @@ template<class T>void store(uintptr_t p,size_t at,T value){std::memcpy(reinterpr
 static uintptr_t init(void *packet){++initCalls;auto p=reinterpret_cast<uintptr_t>(packet);
     for(size_t i=0;i<0x240;++i)if(field<uint8_t>(p,i)!=0)throw std::runtime_error("owned packet must start zeroed");
     if(p%16)throw std::runtime_error("packet SIMD alignment");
-    store(p,0x80,int32_t(-1));store(p,0x84,int32_t(-1));store(p,0x88,int32_t(-1));return p;
+    store(p,0x80,int32_t(-1));store(p,0x84,int32_t(-1));store(p,0x88,int32_t(-1));
+    for(auto at:{0x8cu,0x90u,0x94u,0x98u,0x9cu})store(p,at,int32_t(-1));return p;
 }
 static void param(void *ref,int32_t category,int32_t id){++lookupCalls;
-    if(category!=1 || id!=5000061)throw std::runtime_error("PC normal attack lookup ABI");
+    if(category!=1 || id!=5000010)throw std::runtime_error("PC grounded normal attack lookup ABI");
     store(reinterpret_cast<uintptr_t>(ref),0,id);store(reinterpret_cast<uintptr_t>(ref),0x10,hasParam?paramRow:0);
 }
 static void hit(uintptr_t module,uintptr_t source,void *packet){auto p=reinterpret_cast<uintptr_t>(packet);
     if(field<uintptr_t>(module,8)!=targetChr || source!=attackerChr ||
        field<uintptr_t>(p,0x190)!=source || field<uintptr_t>(p,0x198)!=targetChr)
         throw std::runtime_error("fresh native ownership/three argument ABI");
-    if(field<int32_t>(p,0x28)!=1 || field<int32_t>(p,0x50)!=5000061 || field<int32_t>(p,0x54)!=1)
+    if(field<int32_t>(p,0x28)!=1 || field<int32_t>(p,0x50)!=5000010 || field<int32_t>(p,0x54)!=1)
         throw std::runtime_error("normal hit must never manufacture a deathblow");
+    if(field<int32_t>(p,0x24)!=2 || field<float>(p,0x34)!=15 || field<float>(p,0x38)!=30 ||
+       field<float>(p,0x3c)!=30 || field<int32_t>(p,0x4c)!=105000010 || field<uint32_t>(p,0x7c)!=0x10001)
+        throw std::runtime_error("grounded native attack identity and reaction strengths stay coherent");
+    for(auto at:{0x8cu,0x90u,0x94u,0x98u,0x9cu})
+        if(field<int32_t>(p,at)!=0)throw std::runtime_error("normal profile's empty effect fields");
+    if(field<int16_t>(p,0x1da)!=-1 || field<int16_t>(p,0x1de)!=-1 ||
+       field<uint16_t>(p,0x230)!=0 || field<uint32_t>(p,0xec)!=0 || field<uint32_t>(p,0xf0)!=0)
+        throw std::runtime_error("native reaction selectors set without copying stack padding into flags");
     if(field<int32_t>(p,0x80)!=-1 || field<uintptr_t>(p,0x1c0)!=0 || field<uintptr_t>(p,0x208)!=0)
         throw std::runtime_error("status/defaults and pointer-bearing tail retained");
     if(!bridge::bridgeVitalWriteDepth)throw std::runtime_error("native bridge trace scope");

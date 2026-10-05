@@ -62,7 +62,7 @@ class NativeHitBackend {
         // The PC category and ordinary Kusabimaru parameter are present in the
         // live normal-hit samples. Resolve them anew; no cached PARAM row.
         ParamRef param;
-        int32_t profile=finish?5000600:5000061;
+        int32_t profile=finish?5000600:5000010;
         reinterpret_cast<ParamLookup>(base_+0x10b5160)(&param,1,profile);
         uint8_t floor{};
         if(!param.row || param.index!=profile || param.category!=1 ||
@@ -74,10 +74,14 @@ class NativeHitBackend {
         auto health=float(std::clamp(double(maxHp)*amount/20.,1.,double(maxHp)));
         auto posture=float(std::clamp(double(maxPosture)*amount/20.,0.,double(maxPosture)));
         packet.put(0x00,health);packet.put(0x20,11.f);
-        for(auto at:{0x24u,0x28u,0x2cu,0x30u})packet.put(at,int32_t(1));
-        packet.put(0x34,5.f);packet.put(0x38,10.f);packet.put(0x3c,10.f);packet.put(0x40,int32_t(30));
-        packet.put(0x4c,int32_t(105000061));packet.put(0x50,int32_t(5000061));packet.put(0x54,int32_t(1));
-        packet.put(0x5c,10000.f);packet.put(0x60,.4f);packet.put(0x70,1.f);packet.put(0x7c,uint32_t(0x40001));
+        // Native sample: first grounded Kusabimaru swing (5000010). The old
+        // 5000061 weak-hit identity and reaction strengths were not this profile.
+        packet.put(0x24,int32_t(2));
+        for(auto at:{0x28u,0x2cu,0x30u})packet.put(at,int32_t(1));
+        packet.put(0x34,15.f);packet.put(0x38,30.f);packet.put(0x3c,30.f);packet.put(0x40,int32_t(30));
+        packet.put(0x4c,int32_t(105000010));packet.put(0x50,int32_t(5000010));packet.put(0x54,int32_t(1));
+        packet.put(0x5c,10000.f);packet.put(0x60,.4f);packet.put(0x70,1.f);packet.put(0x7c,uint32_t(0x10001));
+        for(auto at:{0x8cu,0x90u,0x94u,0x98u,0x9cu})packet.put(at,int32_t(0));
         packet.put(0xd0,int32_t(120));packet.put(0xd4,int32_t(100));packet.put(0xd8,uint32_t(0x10000));
         packet.put(0xdc,1.f);packet.put(0xe0,posture);packet.put(0xe4,int32_t(1));
         packet.put(0xf4,uint8_t(5));packet.put(0xf8,int32_t(2110));packet.put(0x114,0.f);
@@ -97,6 +101,10 @@ class NativeHitBackend {
         auto direction=(command.flags&1)?command.direction:sc::normalize(to-from);
         const std::array<float,4> normal{direction.x,direction.y,direction.z,0.f};
         packet.put(0x130,position);packet.put(0x140,normal);packet.put(0x150,normal);
+        // The native collision caller initializes the two secondary reaction
+        // selectors to -1 (99ac29/99ac30). Zero is a real selector, not "unset".
+        // Keep flags/pointers/padding at owned defaults; never replay trace bytes.
+        packet.put(0x1da,int16_t(-1));packet.put(0x1de,int16_t(-1));
         packet.put(0x190,attacker);packet.put(0x198,target);
         BridgeVitalWrite write;
         reinterpret_cast<Hit>(base_+0xb6a040)(module,attacker,&packet);

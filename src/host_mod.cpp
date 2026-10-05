@@ -228,7 +228,10 @@ struct App {
                      movement.canFly() && (mcStatus.load() & 8)!=0;
         bool actionAllowed=mcOwner && focused && edit && !showMenu && !nativeUI;
         bool gameplay=actionAllowed && !dead && !(mcStatus.load()&2);
-        bool grapple=pressed('G'),attack=pressed('R');
+        auto grappleKey=sc::input::grappleVk.load();
+        bool grappleAlias=pressed('G');
+        bool grappleBound=grappleKey!='G' && pressed(int(grappleKey));
+        bool grapple=grappleAlias || grappleBound,attack=pressed('R');
         bridge::NativeActionRequest request;
         bool requested=memory.nativeAction.read(request) && bridge::validAction(request) &&
             request.epoch==epoch && bridge::fresh(GetTickCount64(),request.tick) &&
@@ -241,7 +244,7 @@ struct App {
             if(accepted && (attack || requested))sc::input::attackUntil=now+180;
             if(accepted && grapple)sc::input::grappleUntil=now+180;
         }
-        if(gameplay && (GetAsyncKeyState('G')&0x8000))sc::input::grappleUntil=
+        if(gameplay && ((GetAsyncKeyState('G')&0x8000) || (GetAsyncKeyState(int(grappleKey))&0x8000)))sc::input::grappleUntil=
             std::max(sc::input::grappleUntil.load(),now+50);
         bool handoff=action.update(now,animation,mcOwner && focused && !dead,nativeUI || showMenu);
         combatTrace.animation(animation,(handoff?1u:0u)|(action.confirmed()?2u:0u)|(attack?4u:0u)|
@@ -380,7 +383,8 @@ struct App {
         ImGui::Text("F6 Sekiro UI / MC | F7 diagnostics / F8 input pause / F9 test block");
         auto animation=bridge::readNativeAnimation(host.base());
         ImGui::Text("Native animation=%d valid=%d | action=%d confirmed=%d",animation.id,animation.valid,action.active(),action.confirmed());
-        ImGui::Text("G: native grapple (bind Sekiro grapple to G) | R: native attack / deathblow / resurrection");
+        ImGui::Text("G / %c: grapple (Sekiro binding: %c) | R: attack / deathblow / resurrection",
+                    int(sc::input::grappleVk.load()),int(sc::input::grappleVk.load()));
         ImGui::Text("Sekiro: %s | camera: %s | depth: %s", player.valid ? "loaded" : "not loaded",
                     camera.valid ? "live" : "missing", sceneDepth ? "captured" : "missing");
         ImGui::Text("MC: %s | composite frames: %llu",
@@ -452,13 +456,13 @@ LRESULT CALLBACK modWndProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         if (app->showMenu)
             ImGui_ImplWin32_WndProcHandler(hwnd, msg, w, l);
         bool capture = sc::input::capture;
-        if (capture && !(sc::input::nativeKeys && w=='G' && (msg==WM_KEYDOWN || msg==WM_KEYUP)) &&
+        if (capture && !(sc::input::nativeKeys && w==sc::input::grappleVk.load() && (msg==WM_KEYDOWN || msg==WM_KEYUP)) &&
             ((msg >= WM_KEYFIRST && msg <= WM_KEYLAST) || (msg >= WM_MOUSEFIRST && msg <= WM_MOUSELAST)))
             return 0;
     }
     if (guard.owns_lock())
         guard.unlock();
-    if (sc::input::capture && !(sc::input::nativeKeys && w=='G' && (msg==WM_KEYDOWN || msg==WM_KEYUP)) &&
+    if (sc::input::capture && !(sc::input::nativeKeys && w==sc::input::grappleVk.load() && (msg==WM_KEYDOWN || msg==WM_KEYUP)) &&
         ((msg >= WM_KEYFIRST && msg <= WM_KEYLAST) || (msg >= WM_MOUSEFIRST && msg <= WM_MOUSELAST)))
         return 0;
     if (sc::input::mcEdit) {
@@ -1017,6 +1021,10 @@ DWORD WINAPI scBootstrap(void *) {
         app->reverseDepth = GetPrivateProfileIntW(L"SekiroBridge", L"reverse_depth", 1, config.c_str()) != 0;
         app->hideOriginal = GetPrivateProfileIntW(L"SekiroBridge", L"hide_original", 1, config.c_str()) != 0;
         app->playerFeatures = GetPrivateProfileIntW(L"SekiroBridge", L"player_features", 1, config.c_str()) != 0;
+        wchar_t grappleKey[8]{};
+        GetPrivateProfileStringW(L"SekiroBridge",L"grapple_key",L"G",grappleKey,8,config.c_str());
+        if(grappleKey[0] && !grappleKey[1])sc::input::configureGrapple(grappleKey[0]);
+        sc::log("Native grapple binding="+std::string(1,char(sc::input::grappleVk.load())));
         app->exportWidth =
             std::clamp(GetPrivateProfileIntW(L"SekiroBridge", L"capture_width", 1280, config.c_str()), 320u,
                        bridge::maxWidth);

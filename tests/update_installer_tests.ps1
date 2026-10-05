@@ -123,3 +123,13 @@ $manifest.protocol=1;$manifest|ConvertTo-Json -Depth 6|Set-Content "$($f.dir)\bu
 $failed=$false;try{& "$($f.dir)\scripts\update-installed.ps1" -MinecraftDirectory $f.mc -Diagnostic|Out-Null}catch{$failed=$true}
 Check ($failed -and (Get-Content "$($f.game)\dinput8.dll") -eq 'old host') 'old protocol rejected before mutation'
 Write-Output "$checks total paired-update, diagnostic and rollback checks passed."
+$f=GuiFixture 'mapped-grapple'
+& "$($f.dir)\scripts\update-installed.ps1" -MinecraftDirectory $f.mc -Diagnostic -NativeGrappleKey m|Out-Null
+$ini=Get-Content "$($f.game)\sekirobridge.ini" -Raw
+Check ($ini -match '(?m)^grapple_key=M\r?$' -and $ini -match 'y_offset=137' -and $ini -match 'data_root=custom/path') 'paired update saves user M binding without losing calibration'
+$r=Get-Content "$($f.dir)\runtime\installation.json" -Raw|ConvertFrom-Json
+Check ($r.files[1].sha256 -eq (Get-FileHash "$($f.game)\sekirobridge.ini").Hash) 'mapped key remains covered by installation checksum'
+$f=GuiFixture 'invalid-grapple';$before=(Get-FileHash "$($f.game)\sekirobridge.ini").Hash
+$failed=$false;try{& "$($f.dir)\scripts\update-installed.ps1" -MinecraftDirectory $f.mc -Diagnostic -NativeGrappleKey 'MM'|Out-Null}catch{$failed=$true}
+Check ($failed -and (Get-FileHash "$($f.game)\sekirobridge.ini").Hash -eq $before) 'invalid native binding fails before touching installed files'
+Write-Output "$checks total paired-update, diagnostic, mapped grapple and rollback checks passed."

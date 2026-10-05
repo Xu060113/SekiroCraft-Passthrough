@@ -21,6 +21,14 @@ inline std::atomic<bool> nativeKeys{false};
 inline std::atomic<bool> nativeUI{false};
 inline std::atomic<uint64_t> attackUntil{};
 inline std::atomic<uint64_t> grappleUntil{};
+inline std::atomic<DWORD> grappleVk{'G'},grappleScan{DIK_G};
+inline bool configureGrapple(wchar_t key){
+    if(key>=L'a' && key<=L'z')key-=L'a'-L'A';
+    if(key<L'A' || key>L'Z')return false;
+    auto scan=MapVirtualKeyW(DWORD(key),MAPVK_VK_TO_VSC);
+    if(!scan || scan>=256)return false;
+    grappleVk=DWORD(key);grappleScan=scan;return true;
+}
 inline std::array<std::atomic<bool>,4> bufferedAttack{};
 inline std::array<std::atomic<bool>,4> bufferedGrapple{};
 inline bool attackHeld(){return GetTickCount64()<attackUntil.load(std::memory_order_relaxed);}
@@ -76,11 +84,9 @@ template <int I> inline HRESULT STDMETHODCALLTYPE stateHook(void *device, DWORD 
     // rather than guessing from its custom data format's buffer length.
     if (SUCCEEDED(result) && out && capture.load(std::memory_order_relaxed) && keyboardOrMouse(device)) {
         auto type=deviceType(device);
-        uint8_t grapple=type==DI8DEVTYPE_KEYBOARD && size==256 && nativeKeys?
-            static_cast<uint8_t*>(out)[DIK_G]:0;
         std::memset(out, 0, size);
-        if(type==DI8DEVTYPE_KEYBOARD && size==256)static_cast<uint8_t*>(out)[DIK_G]=
-            nativeKeys && grappleHeld()?0x80:grapple;
+        if(type==DI8DEVTYPE_KEYBOARD && size==256 && nativeKeys && grappleHeld())
+            static_cast<uint8_t*>(out)[grappleScan.load(std::memory_order_relaxed)]=0x80;
         if(type==DI8DEVTYPE_MOUSE && (size==sizeof(DIMOUSESTATE) || size==sizeof(DIMOUSESTATE2)) && nativeKeys && attackHeld())
             static_cast<DIMOUSESTATE*>(out)->rgbButtons[0]=0x80;
     }
@@ -127,7 +133,7 @@ inline HRESULT STDMETHODCALLTYPE dataHook(void *device, DWORD size, DIDEVICEOBJE
         }
         if(out && size==sizeof(DIDEVICEOBJECTDATA) && type==DI8DEVTYPE_KEYBOARD && capacity){
             bool held=nativeKeys && grappleHeld();bool old=bufferedGrapple[I].exchange(held);
-            if(old!=held){DIDEVICEOBJECTDATA event{};event.dwOfs=DIK_G;event.dwData=held?0x80:0;
+            if(old!=held){DIDEVICEOBJECTDATA event{};event.dwOfs=grappleScan.load(std::memory_order_relaxed);event.dwData=held?0x80:0;
                 event.dwTimeStamp=DWORD(GetTickCount64());out[written++]=event;}
         }
         *count = written;

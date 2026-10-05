@@ -1,5 +1,7 @@
-param([string]$MinecraftDirectory='E:\.minecraft\versions\1.20.1-Fabric 0.16.10',[switch]$Diagnostic)
+param([string]$MinecraftDirectory='E:\.minecraft\versions\1.20.1-Fabric 0.16.10',[switch]$Diagnostic,
+      [string]$NativeGrappleKey='')
 $ErrorActionPreference='Stop'
+if($NativeGrappleKey -and $NativeGrappleKey -notmatch '^[A-Za-z]$'){throw 'NativeGrappleKey must be a single letter matching the Sekiro binding.'}
 $projectRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $recordPath=Join-Path $projectRoot 'runtime\installation.json'
 $record=Get-Content -LiteralPath $recordPath -Raw | ConvertFrom-Json
@@ -71,6 +73,11 @@ try {
             $preview=[int][bool]$Diagnostic
             $match.Groups[1].Value+$body.TrimEnd()+"`r`ncombat_trace=$preview`r`nnative_hits=$preview`r`nnative_phase_finish=0`r`n"
         })
+        if($NativeGrappleKey){
+            $ini=[regex]::Replace($ini,'(?im)^\s*grapple_key\s*=.*(?:\r?\n|$)','')
+            $key=$NativeGrappleKey.ToUpperInvariant()
+            $ini=[regex]::Replace($ini,'(?im)^(\[SekiroBridge\][^\r\n]*\r?\n)',{param($m);$m.Value+"grapple_key=$key`r`n"})
+        }
         Set-Content -LiteralPath $configTarget -Value $ini -Encoding UTF8
     }
     if($guiPatch){

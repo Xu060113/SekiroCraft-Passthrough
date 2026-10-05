@@ -103,8 +103,12 @@ class NativeMovement {
             sc::Vec3 target{};float angle{};
             bool have=driver_->target(target,&angle);
             if(control_.flags & (NativeDead|NativeAction)){releaseFlight();lastPhysics_=0;return;}
+            // Position ownership is enforced by the candidate store and input
+            // isolation. NoMove also interferes with native action eligibility;
+            // allow the invisible hero's state machine to run while MC drives.
+            noMove_.release();
             if (!have || !canFly_ ||
-                !gravity_.acquire(physics+0x92d,1) || !noMove_.acquire(hero+0x1f40,128)) {
+                !gravity_.acquire(physics+0x92d,1)) {
                 releaseFlight(); return;
             }
             candidate[0]=target.x;candidate[1]=target.y;candidate[2]=target.z;
