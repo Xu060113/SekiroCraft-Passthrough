@@ -115,8 +115,9 @@ public final class MixinTargets {
                             annotation = a;
                 require(annotation != null, "Mixin target annotation " + c.name);
                 @SuppressWarnings("unchecked") var targets = (List<Type>)value(annotation, "value");
-                require(targets.size() == 1, "one target " + c.name);
-                var targetEntry = game.getJarEntry(targets.get(0).getInternalName() + ".class");
+                require(targets!=null && !targets.isEmpty(), "at least one target " + c.name);
+                for(var targetType:targets){
+                var targetEntry = game.getJarEntry(targetType.getInternalName() + ".class");
                 require(targetEntry != null, "mapped target exists");
                 var target = read(game.getInputStream(targetEntry).readAllBytes());
                 for (var method : c.methods)
@@ -130,6 +131,28 @@ public final class MixinTargets {
                                         -> (m.name.equals(mapped) || (m.name + m.desc).equals(mapped)) &&
                                                m.desc.equals(method.desc)),
                                     "Invoker/shadow descriptor " + c.name + " " + name + method.desc);
+                        }
+                        if(a.desc.endsWith("/Redirect;")){
+                            @SuppressWarnings("unchecked") var selectors=(List<String>)value(a,"method");
+                            var at=(AnnotationNode)value(a,"at");
+                            require("INVOKE".equals(value(at,"value")),"supported redirect callsite "+c.name);
+                            String callee=remap(references,c.name,(String)value(at,"target"));
+                            for(String selector:selectors){
+                                String mapped=member(remap(references,c.name,selector));
+                                var calls=new ArrayList<MethodInsnNode>();
+                                for(var m:target.methods)if(m.name.equals(mapped) || (m.name+m.desc).equals(mapped)){
+                                    require((method.access&Opcodes.ACC_STATIC)==(m.access&Opcodes.ACC_STATIC),"redirect caller static modifier "+c.name);
+                                    for(var insn:m.instructions)if(insn instanceof MethodInsnNode call &&
+                                        ("L"+call.owner+";"+call.name+call.desc).equals(callee))calls.add(call);
+                                }
+                                int ordinal=value(at,"ordinal") instanceof Integer n?n:0;
+                                require(calls.size()>ordinal,"exact redirect callsite "+c.name+" "+callee);
+                                var call=calls.get(ordinal);var expected=new ArrayList<Type>();
+                                if(call.getOpcode()!=Opcodes.INVOKESTATIC)expected.add(Type.getObjectType(call.owner));
+                                expected.addAll(Arrays.asList(Type.getArgumentTypes(call.desc)));
+                                require(expected.equals(Arrays.asList(Type.getArgumentTypes(method.desc))) &&
+                                    Type.getReturnType(method.desc).equals(Type.getReturnType(call.desc)),"redirect handler descriptor "+c.name);
+                            }
                         }
                         if (!a.desc.endsWith("/Inject;"))
                             continue;
@@ -160,6 +183,7 @@ public final class MixinTargets {
                                 }
                         }
                     }
+                }
             }
         }
         System.out.println(checks + " mapped Minecraft mixin target checks passed (no client launched)");

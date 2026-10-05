@@ -113,12 +113,14 @@ public final class InputForwarder {
         if(!initialized || epoch!=s.epoch()){
             release();initialized=true;epoch=s.epoch();eventSequence=next;dx=nx;dy=ny;textSequence=s.textSequence();pointerEventTick=0;}
         boolean input=(s.flags()&Protocol.EDIT)!=0 && (s.flags()&Protocol.MENU)==0;
+        boolean nativeAction=(s.flags()&Protocol.NATIVE_ACTION)!=0 && !target.screenOpen();
+        if(nativeAction)input=false;
         try{replaying=true;
             if(!input)releaseHeld();
             else if(!inputEnabled){
                 // Restore held movement/modifier levels after focus or F8. Do not
                 // turn a sampled button/key level into a second click/action.
-                for(int vk=8;vk<256;++vk)if(forwardedKey(vk) && s.key(vk)){
+                for(int vk=8;vk<256;++vk)if(forwardedKey(vk) && s.key(vk) && (target.screenOpen() || (vk!='G' && vk!='R'))){
                     int key=glfwKey(vk);if(key!=GLFW.GLFW_KEY_UNKNOWN)pressed[vk]=key;}
             }
             inputEnabled=input;
@@ -128,7 +130,7 @@ public final class InputForwarder {
                 int at=40+(int)(i%128)*32,kind=events.getInt(at),code=events.getInt(at+4),action=events.getInt(at+8);
                 int mods=events.getInt(at+12);replayMods=mods;
                 if(!input)continue;
-                if(kind==1)key(code,action,mods);
+                if(kind==1){if(!target.screenOpen() && (code=='G' || code=='R'))continue;key(code,action,mods);}
                 else if(kind==2){pointerEventTick=tick;
                     if(target.screenOpen())cursor(events.getFloat(at+16),events.getFloat(at+20));button(code,action,mods);}
                 else if(kind==3){pointerEventTick=tick;

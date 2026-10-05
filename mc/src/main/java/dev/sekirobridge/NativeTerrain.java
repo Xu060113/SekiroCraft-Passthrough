@@ -59,6 +59,11 @@ public final class NativeTerrain {
     private static boolean applies(Snapshot current,Entity entity){
         return current!=null && entity!=null && TerrainEntityPolicy.applies(current.scope(),entity.getWorld(),entity.getClass());
     }
+    public static boolean worldActive(Object world){var current=available();var state=BridgeClient.state();
+        return current!=null && current.scope().contains(world) && state!=null && Protocol.fresh(NativeBridge.clockMs(),state.tickMs());}
+    public static BlockHitResult projectileRaycast(Object world,Vec3d start,Vec3d end){
+        var current=available();return worldActive(world)?TerrainGeometry.projectileRaycast(current.surfaces(),NativeBridge.clockMs(),start,end):null;
+    }
     /** Read-only native support query for footsteps and other contact feedback. */
     public static boolean supports(Entity entity){
         var current=available();

@@ -15,15 +15,19 @@ final class PlayerSync {
     private long epoch;
     private Object clientIdentity;
     private long clientEpoch;
+    private boolean clientHandoff,serverHandoff;
     void client(Protocol.State s){
         var p=MinecraftClient.getInstance().player;if(p==null)return;
-        if(clientIdentity==p && clientEpoch==s.epoch())return;
+        boolean handoff=(s.flags()&(Protocol.NATIVE_ACTION|Protocol.NATIVE_DEAD))!=0;
+        boolean initial=clientIdentity!=p || clientEpoch!=s.epoch();
+        if(!initial && !handoff && !clientHandoff)return;
+        clientHandoff=handoff;
         clientIdentity=p;clientEpoch=s.epoch();
         // Seed once; vanilla owns movement, gravity, rotation and animation afterwards.
         p.setPosition(s.mcX(s.px()),s.mcY(s.py()),s.mcZ(s.pz()));
         p.prevX=p.lastRenderX=p.getX();p.prevY=p.lastRenderY=p.getY();p.prevZ=p.lastRenderZ=p.getZ();
-        p.setYaw(s.yaw());p.setPitch(s.pitch());p.prevYaw=p.getYaw();p.prevPitch=p.getPitch();p.setVelocity(Vec3d.ZERO);
-        NativeTerrain.seed(s,p.getPos());
+        if(initial){p.setYaw(s.yaw());p.setPitch(s.pitch());p.prevYaw=p.getYaw();p.prevPitch=p.getPitch();NativeTerrain.seed(s,p.getPos());}
+        p.setVelocity(Vec3d.ZERO);p.fallDistance=0;
     }
     void server(MinecraftServer server,Protocol.State s){
         if(s==null){release();return;}
@@ -35,6 +39,12 @@ final class PlayerSync {
             p.setNoGravity(false);p.noClip=false;
             p.teleport(p.getServerWorld(),s.mcX(s.px()),s.mcY(s.py()),s.mcZ(s.pz()),s.yaw(),s.pitch());p.setVelocity(Vec3d.ZERO);
         }
+        boolean handoff=(s.flags()&(Protocol.NATIVE_ACTION|Protocol.NATIVE_DEAD))!=0;
+        if(handoff || serverHandoff){
+            p.teleport(p.getServerWorld(),s.mcX(s.px()),s.mcY(s.py()),s.mcZ(s.pz()),p.getYaw(),p.getPitch());
+            p.setVelocity(Vec3d.ZERO);p.fallDistance=0;
+        }
+        serverHandoff=handoff;
         if(command!=s.command()){
             command=s.command();BlockPos target=BlockPos.ofFloored(p.getEyePos().add(p.getRotationVec(1).multiply(4)));
             if(p.getServerWorld().isInBuildLimit(target) && p.getServerWorld().isAir(target) &&
@@ -42,7 +52,7 @@ final class PlayerSync {
                 p.getServerWorld().setBlockState(target,Blocks.GRASS_BLOCK.getDefaultState());
         }
     }
-    void reset(){clientIdentity=null;clientEpoch=0;NativeTerrain.clear();}
+    void reset(){clientIdentity=null;clientEpoch=0;clientHandoff=false;NativeTerrain.clear();}
     private void release(){if(owned!=null){owned.setNoGravity(oldGravity);owned.noClip=oldClip;owned.setVelocity(Vec3d.ZERO);
-        if(owned.isAlive())owned.teleport(owned.getServerWorld(),originalPosition.x,originalPosition.y,originalPosition.z,originalYaw,originalPitch);owned=null;}}
+        if(owned.isAlive())owned.teleport(owned.getServerWorld(),originalPosition.x,originalPosition.y,originalPosition.z,originalYaw,originalPitch);owned=null;}serverHandoff=false;}
 }

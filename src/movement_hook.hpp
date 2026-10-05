@@ -101,7 +101,9 @@ class NativeMovement {
         if (!active_ || !fresh(now, control_.tickMs)) { releaseFlight(); lastPhysics_ = 0; return; }
         if (driver_ && (control_.capabilities & mcOwnerCapability)) {
             sc::Vec3 target{};
-            if (!driver_->target(target) || !canFly_ ||
+            bool have=driver_->target(target);
+            if(control_.flags & (NativeDead|NativeAction)){releaseFlight();lastPhysics_=0;return;}
+            if (!have || !canFly_ ||
                 !gravity_.acquire(physics+0x92d,1) || !noMove_.acquire(hero+0x1f40,128)) {
                 releaseFlight(); return;
             }

@@ -23,12 +23,22 @@ int wmain(int argc, wchar_t **argv) {
     bridge::CombatState combat;combat.sequence=1;combat.epoch=c.epoch;combat.hero=101;combat.hp=250;combat.maxHp=500;combat.flags=1;
     combat.count=1;combat.actors[0]={102,{12,4,8},200,400,6,1,0};
     auto deadline = GetTickCount64() + 7000;
+    bool projectileVerified=false,actionVerified=false;
     while (GetTickCount64() < deadline) {
         c.tickMs = GetTickCount64();
         m.writeControl(c);
         input.tick=c.tickMs;terrain.tick=c.tickMs;
         m.input.write(input);m.terrain.write(terrain);
         combat.tick=c.tickMs;m.combatState.write(combat);
+        bridge::NativeActionRequest action;
+        if(m.nativeAction.read(action) && bridge::validAction(action)){
+            if(action.epoch!=c.epoch || action.sequence!=77 || action.kind!=1)return 9;actionVerified=true;}
+        bridge::ProjectileRays queries;
+        if(m.projectileRays.read(queries) && bridge::validRays(queries)){
+            if(queries.epoch!=c.epoch || queries.count!=1 || queries.rays[0].id!=201 || queries.rays[0].start.y!=4 || queries.rays[0].delta.y!=-2)return 10;
+            bridge::ProjectileHits hits;hits.sequence=queries.sequence;hits.tick=c.tickMs;hits.epoch=c.epoch;hits.count=1;
+            hits.hits[0]={201,{12,3,8},{0,1,0},1,0};m.projectileHits.write(hits);projectileVerified=true;
+        }
         auto f = m.readFrame(0, c.epoch);
         bridge::PhysicsPacket physics;
         bridge::PlayerPacket player;
@@ -45,7 +55,8 @@ int wmain(int argc, wchar_t **argv) {
                player.eye.y!=5.62f || player.forward.z!=1 || player.velocity.x!=4)return 7;
             if(report.hero!=101 || report.session!=103 || report.damage!=.1 || report.heal!=.05 || report.invulnerable!=1 ||
                report.command!=1 || report.commands[0].actor!=102 || report.commands[0].amount!=7)return 8;
-            std::cout << "Cross-process frame, physics, click stream, terrain, player/camera, native actors, health and injury ABI passed\n";
+            if(!projectileVerified || !actionVerified)return 11;
+            std::cout << "Cross-process frame, physics, click stream, terrain, player/camera, combat, resurrection and projectile ray ABI passed\n";
             return 0;
         }
         Sleep(5);

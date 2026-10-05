@@ -120,4 +120,14 @@ final class TerrainGeometry {
         }
         return hit==null?null:new BlockHitResult(hit,Direction.UP,BlockPos.ofFloored(hit),false);
     }
+    /** Exact sampled top contact for projectiles, without placement-cell rounding. */
+    static BlockHitResult projectileRaycast(List<Surface> surfaces,long now,Vec3d start,Vec3d end){
+        double dy=end.y-start.y;if(dy>=-1e-7)return null;
+        double nearest=Double.POSITIVE_INFINITY;Vec3d hit=null;
+        for(var s:surfaces){if(!retained(now,s.tick()))continue;var b=s.box();double t=(b.maxY-start.y)/dy;
+            if(t<0 || t>1 || t>=nearest)continue;
+            var p=start.add(end.subtract(start).multiply(t));
+            if(p.x>=b.minX && p.x<b.maxX && p.z>=b.minZ && p.z<b.maxZ){nearest=t;hit=p;}}
+        return hit==null?null:new BlockHitResult(hit,Direction.UP,BlockPos.ofFloored(hit),false);
+    }
 }

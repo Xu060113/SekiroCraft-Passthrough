@@ -10,6 +10,8 @@
 #include "physics.hpp"
 #include "session.hpp"
 #include "combat.hpp"
+#include "native_action.hpp"
+#include "projectile_rays.hpp"
 #include <string>
 #include <memory>
 
@@ -57,6 +59,9 @@ class SharedMemory {
     SnapshotChannel<TerrainPacket> terrain;
     SnapshotChannel<CombatState> combatState;
     SnapshotChannel<CombatReport> combatReport;
+    SnapshotChannel<NativeActionRequest> nativeAction;
+    SnapshotChannel<ProjectileRays> projectileRays;
+    SnapshotChannel<ProjectileHits> projectileHits;
     ~SharedMemory() { close(); }
     SharedMemory() = default;
     SharedMemory(const SharedMemory &) = delete;
@@ -77,7 +82,8 @@ class SharedMemory {
         if (!physics.open(channel)) return false;
         if (!input.open(channel,L"input-v2") || !player.open(channel,L"player-v2") ||
             !terrain.open(channel,L"terrain-v2") || !combatState.open(channel,L"combat-state-v2") ||
-            !combatReport.open(channel,L"combat-report-v1")) {close();return false;}
+            !combatReport.open(channel,L"combat-report-v1") || !nativeAction.open(channel,L"native-action-v1") ||
+            !projectileRays.open(channel,L"projectile-rays-v1") || !projectileHits.open(channel,L"projectile-hits-v1")) {close();return false;}
         auto name = L"Local\\SekiroBridge-" + channel;
         mutex_ = CreateMutexW(nullptr, FALSE, (name + L"-lock").c_str());
         mapping_ = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, DWORD(mappingBytes),
@@ -107,6 +113,8 @@ class SharedMemory {
         physics.close();
         input.close(); player.close(); terrain.close();
         combatState.close();combatReport.close();
+        nativeAction.close();
+        projectileRays.close();projectileHits.close();
         if (bytes_)
             UnmapViewOfFile(bytes_);
         if (mapping_)

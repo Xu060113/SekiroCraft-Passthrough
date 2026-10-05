@@ -17,6 +17,13 @@ inline std::atomic<bool> capture{false};
 inline std::atomic<bool> mcEdit{false};
 inline std::atomic<bool> flying{false};
 inline std::atomic<bool> mcOwner{false};
+inline std::atomic<bool> nativeKeys{false};
+inline std::atomic<uint64_t> attackUntil{};
+inline std::atomic<uint64_t> grappleUntil{};
+inline std::array<std::atomic<bool>,4> bufferedAttack{};
+inline std::array<std::atomic<bool>,4> bufferedGrapple{};
+inline bool attackHeld(){return GetTickCount64()<attackUntil.load(std::memory_order_relaxed);}
+inline bool grappleHeld(){return GetTickCount64()<grappleUntil.load(std::memory_order_relaxed);}
 inline std::atomic<int64_t> mouseDx{},mouseDy{};
 inline std::atomic<uint64_t> mouseStateTick{},mouseStates{},mouseData{};
 using State = HRESULT(STDMETHODCALLTYPE *)(void *, DWORD, void *);
@@ -66,8 +73,16 @@ template <int I> inline HRESULT STDMETHODCALLTYPE stateHook(void *device, DWORD 
     }
     // Preserve native validation and acquisition errors; classify the device itself,
     // rather than guessing from its custom data format's buffer length.
-    if (SUCCEEDED(result) && out && capture.load(std::memory_order_relaxed) && keyboardOrMouse(device))
+    if (SUCCEEDED(result) && out && capture.load(std::memory_order_relaxed) && keyboardOrMouse(device)) {
+        auto type=deviceType(device);
+        uint8_t grapple=type==DI8DEVTYPE_KEYBOARD && size==256 && nativeKeys?
+            static_cast<uint8_t*>(out)[DIK_G]:0;
         std::memset(out, 0, size);
+        if(type==DI8DEVTYPE_KEYBOARD && size==256)static_cast<uint8_t*>(out)[DIK_G]=
+            nativeKeys && grappleHeld()?0x80:grapple;
+        if(type==DI8DEVTYPE_MOUSE && (size==sizeof(DIMOUSESTATE) || size==sizeof(DIMOUSESTATE2)) && nativeKeys && attackHeld())
+            static_cast<DIMOUSESTATE*>(out)->rgbButtons[0]=0x80;
+    }
     else if (SUCCEEDED(result) && out && (mcEdit.load(std::memory_order_relaxed) || flying.load(std::memory_order_relaxed))) {
         auto type = deviceType(device);
         if (type == DI8DEVTYPE_MOUSE && (size == sizeof(DIMOUSESTATE) || size == sizeof(DIMOUSESTATE2))) {
@@ -85,6 +100,7 @@ template <int I> inline HRESULT STDMETHODCALLTYPE stateHook(void *device, DWORD 
 template <int I>
 inline HRESULT STDMETHODCALLTYPE dataHook(void *device, DWORD size, DIDEVICEOBJECTDATA *out, DWORD *count,
                                           DWORD flags) {
+    DWORD capacity=count?*count:0;
     auto result = originalData[I](device, size, out, count, flags);
     if(SUCCEEDED(result) && out && count && size==sizeof(DIDEVICEOBJECTDATA) && mcOwner &&
         deviceType(device)==DI8DEVTYPE_MOUSE && GetTickCount64()-mouseStateTick.load()>100){
@@ -98,10 +114,22 @@ inline HRESULT STDMETHODCALLTYPE dataHook(void *device, DWORD size, DIDEVICEOBJE
         mouseData.fetch_add(1);
     }
     if (SUCCEEDED(result) && count && capture.load(std::memory_order_relaxed) && keyboardOrMouse(device)) {
+        DWORD type=deviceType(device),written=0;
         // Also drain peeked events. Otherwise menu clicks could replay after closing.
         DWORD discarded = INFINITE;
         originalData[I](device, size, nullptr, &discarded, 0);
-        *count = 0;
+        if(out && size==sizeof(DIDEVICEOBJECTDATA) && type==DI8DEVTYPE_MOUSE && capacity){
+            bool held=nativeKeys && attackHeld();
+            bool old=bufferedAttack[I].exchange(held);
+            if(old!=held){DIDEVICEOBJECTDATA event{};event.dwOfs=DIMOFS_BUTTON0;event.dwData=held?0x80:0;
+                event.dwTimeStamp=DWORD(GetTickCount64());out[written++]=event;}
+        }
+        if(out && size==sizeof(DIDEVICEOBJECTDATA) && type==DI8DEVTYPE_KEYBOARD && capacity){
+            bool held=nativeKeys && grappleHeld();bool old=bufferedGrapple[I].exchange(held);
+            if(old!=held){DIDEVICEOBJECTDATA event{};event.dwOfs=DIK_G;event.dwData=held?0x80:0;
+                event.dwTimeStamp=DWORD(GetTickCount64());out[written++]=event;}
+        }
+        *count = written;
     } else if (SUCCEEDED(result) && out && count && size == sizeof(DIDEVICEOBJECTDATA) &&
                (mcEdit.load(std::memory_order_relaxed) || flying.load(std::memory_order_relaxed))) {
         DWORD type = deviceType(device), written = 0;

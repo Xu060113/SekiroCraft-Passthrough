@@ -97,6 +97,16 @@ int main(){int n{};auto check=[&](bool b,const char*s){++n;if(!b)throw std::runt
     put(npcData,0x14c,int(0));put(npcData,0x148,int(0));Sleep(80);combat.tick(8,true);memory.combatState.read(state);
     check(state.actors[0].bossNode==2 && state.actors[0].maxPosture==0,
         "Boss node protection does not depend on posture availability");
+    auto previousLife=state.hero;
+    put(data,0x130,int(0));p.tick=GetTickCount64();p.damage=1;
+    memory.combatReport.write(p);Sleep(60);combat.tick(8,true);memory.combatState.read(state);
+    check(state.hp==0 && state.hero==previousLife,"death still publishes a valid native life for the GUI");
+    put(data,0x130,int(500));Sleep(60);combat.tick(8,true);memory.combatState.read(state);
+    check(state.hero!=previousLife && state.hp==500 && state.ackSession==0,
+        "same-address resurrection rejects the pre-death health report");
+    auto revivedLife=state.hero;
+    Sleep(60);combat.tick(8,true);memory.combatState.read(state);
+    check(state.hero==revivedLife && state.hp==500,"stale fatal report cannot kill the resurrected hero next tick");
     VirtualProtect(image.data()+0xbd6000,4096,hpOld,&hpOld);VirtualProtect(image.data()+0xa4a000,4096,lookupOld,&lookupOld);
     std::cout<<n<<" combat layout, validation and owned player immunity checks passed\n";
 }

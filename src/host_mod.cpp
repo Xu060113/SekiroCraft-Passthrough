@@ -168,6 +168,8 @@ struct App {
     int cursorAdjustment{};
     RECT previousClip{};
     bridge::Control control;
+    bridge::ActionHandoff action;
+    uint64_t actionRequestSeen{},actionRequestTick{};
     std::string status = "Waiting for Minecraft and a playable Sekiro scene.";
     std::string worldReason = "Waiting for a completed world frame.", overlayReason;
     void cursor(bool on) {
@@ -213,11 +215,31 @@ struct App {
         auto c = host.camera(player);
         camera = c.value_or(sc::Camera{});
         auto vitals = host.vitals();
-        bool scene = player.valid && camera.valid && sceneDepth && frames - depthFrame <= 2 &&
-                     (!vitals.valid || vitals.hp > 0);
+        bool dead=vitals.valid && vitals.hp==0;
+        bool scene = player.valid && camera.valid && sceneDepth && (dead || frames - depthFrame <= 2);
         bool capturing = focused && (showMenu || (scene && (mcStatus.load() & 2) != 0));
         bool mcOwner=scene && playerFeatures && driver.ready() && movement.installed() &&
                      movement.canFly() && (mcStatus.load() & 8)!=0;
+        bool actionAllowed=mcOwner && focused && edit && !showMenu;
+        bool gameplay=actionAllowed && !dead && !(mcStatus.load()&2);
+        bool grapple=pressed('G'),attack=pressed('R');
+        bridge::NativeActionRequest request;
+        bool requested=memory.nativeAction.read(request) && bridge::validAction(request) &&
+            request.epoch==epoch && bridge::fresh(GetTickCount64(),request.tick) &&
+            (request.sequence!=actionRequestSeen || request.tick!=actionRequestTick);
+        if(requested){actionRequestSeen=request.sequence;actionRequestTick=request.tick;}
+        auto now=GetTickCount64();
+        if((gameplay && (grapple || attack)) || (actionAllowed && dead && (attack || requested))){
+            if(!dead)action.begin(now,player.position,attack?6500:2500);
+            if(attack || requested)sc::input::attackUntil=now+180;
+            if(grapple)sc::input::grappleUntil=now+180;
+        }
+        if(gameplay && (GetAsyncKeyState('G')&0x8000))sc::input::grappleUntil=
+            std::max(sc::input::grappleUntil.load(),now+50);
+        bool handoff=action.update(now,player.position,
+            (GetAsyncKeyState('G')&0x8000) || (GetAsyncKeyState('R')&0x8000),gameplay);
+        sc::input::nativeKeys=actionAllowed && (dead || handoff);
+        if(!sc::input::nativeKeys){sc::input::attackUntil=0;sc::input::grappleUntil=0;}
         sc::input::mcOwner=mcOwner && focused;
         sc::input::capture = capturing || (mcOwner && focused);
         sc::input::mcEdit = focused && scene && edit && !showMenu && (mcStatus.load() & 1) != 0;
@@ -232,7 +254,8 @@ struct App {
         control.epoch = epoch;
         control.flags = (scene ? bridge::Scene : 0) | (focused ? bridge::Focus : 0) |
                         (edit ? bridge::Edit : 0) |
-                        (showMenu ? bridge::Menu : 0);
+                        (showMenu ? bridge::Menu : 0) | (dead ? bridge::NativeDead : 0) |
+                        (handoff ? bridge::NativeAction : 0);
         control.capabilities = 7 | (playerFeatures && movement.installed() ? bridge::constraintCapability : 0) |
                                (playerFeatures && movement.canFly() ? bridge::flightCapability : 0);
         if(playerFeatures && driver.ready() && movement.installed() && movement.canFly())
@@ -341,6 +364,7 @@ struct App {
             return;
         ImGui::Begin("Sekiro + Minecraft passthrough", &showMenu);
         ImGui::Text("Minecraft owns the player | F7 diagnostics / F8 input pause / F9 test block");
+        ImGui::Text("G: native grapple (bind Sekiro grapple to G) | R: native attack / deathblow / resurrection");
         ImGui::Text("Sekiro: %s | camera: %s | depth: %s", player.valid ? "loaded" : "not loaded",
                     camera.valid ? "live" : "missing", sceneDepth ? "captured" : "missing");
         ImGui::Text("MC: %s | composite frames: %llu",
@@ -408,13 +432,13 @@ LRESULT CALLBACK modWndProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         if (app->showMenu)
             ImGui_ImplWin32_WndProcHandler(hwnd, msg, w, l);
         bool capture = sc::input::capture;
-        if (capture &&
+        if (capture && !(sc::input::nativeKeys && w=='G' && (msg==WM_KEYDOWN || msg==WM_KEYUP)) &&
             ((msg >= WM_KEYFIRST && msg <= WM_KEYLAST) || (msg >= WM_MOUSEFIRST && msg <= WM_MOUSELAST)))
             return 0;
     }
     if (guard.owns_lock())
         guard.unlock();
-    if (sc::input::capture &&
+    if (sc::input::capture && !(sc::input::nativeKeys && w=='G' && (msg==WM_KEYDOWN || msg==WM_KEYUP)) &&
         ((msg >= WM_KEYFIRST && msg <= WM_KEYLAST) || (msg >= WM_MOUSEFIRST && msg <= WM_MOUSELAST)))
         return 0;
     if (sc::input::mcEdit) {

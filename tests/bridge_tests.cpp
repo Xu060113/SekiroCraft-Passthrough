@@ -177,6 +177,20 @@ int main(int argc, char **argv) {
         lastSnapshot = displayed->meta.sequence;
     require(intact && lastSnapshot == 10000, "concurrent atomic handoff keeps complete ordered snapshots");
     bridge::KeyEdge hotkey;
+    bridge::ActionHandoff handoff;handoff.begin(1000,{0,0,0});
+    require(handoff.update(1200,{0,0,0},false,true),"native action keeps its root motion window");
+    require(handoff.update(3600,{0,8,0},false,true),"grapple ascent extends native authority");
+    require(handoff.update(4200,{0,8,0},false,true),"native movement must settle before MC resumes");
+    require(!handoff.update(4500,{0,8,0},false,true),"settled native action hands position back to MC");
+    handoff.begin(5000,{0,0,0});require(!handoff.update(5100,{0,0,0},true,false),"death/focus loss releases handoff");
+    handoff.begin(6000,{0,0,0});require(!handoff.update(27000,{0,8,0},true,true),"lost action key has bounded ownership");
+    bridge::ProjectileRays rays;rays.sequence=1;rays.tick=100;rays.epoch=123;rays.count=1;rays.rays[0]={9,{1,2,3},{0,-3,0}};
+    require(bridge::validRays(rays) && host.projectileRays.write(rays),"projectile ray packet transport");
+    bridge::ProjectileRays readRays;require(mc.projectileRays.read(readRays) && readRays.rays[0].id==9,"projectile query identity survives IPC");
+    rays.rays[0].delta.x=NAN;require(!bridge::validRays(rays),"nonfinite projectile path rejected");
+    bridge::ProjectileHits hits;hits.sequence=1;hits.tick=100;hits.epoch=123;hits.count=1;hits.hits[0]={9,{1,0,3},{0,1,0},1,0};
+    require(bridge::validHits(hits) && mc.projectileHits.write(hits),"native projectile contact transport");
+    hits.hits[0].normal={0,0,0};require(!bridge::validHits(hits),"invalid native contact normal rejected");
     require(hotkey.update(true, true), "physical and message key edges toggle once");
     require(!hotkey.update(true, false) && !hotkey.update(true, true),
             "a held key and its delayed message cannot toggle back off");

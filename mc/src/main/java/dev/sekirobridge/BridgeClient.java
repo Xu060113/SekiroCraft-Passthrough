@@ -81,8 +81,10 @@ public final class BridgeClient implements ClientModInitializer {
         if(!connected && wasConnected)PLAYERS.reset();
         wasConnected=connected;
         if(connected)NativeTerrain.poll(state);
+        ProjectileTerrain.poll();
         AudioBridge.tick();
         CombatBridge.poll();
+        DeathSync.tick();
         if (handle != 0)
             NativeBridge.status(handle, connected() ? (1 | 8 | (client.currentScreen != null ? 2 : 0) |
                 (client.player != null && client.player.getAbilities().flying &&

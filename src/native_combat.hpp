@@ -16,6 +16,7 @@ class NativeCombatAdapter {
     uint64_t nextId_{},heroId_{},epoch_{},sequence_{},publishAt_{},session_{},ackCommand_{};
     uintptr_t hero_{},heroData_{}; uint32_t heroHandle_{};
     double damage_{},heal_{};
+    bool dead_{};
     CombatReport report_{};
     NativeHitBackend nativeHit_;
     std::atomic<bool> nativeHits_{};
@@ -66,7 +67,7 @@ class NativeCombatAdapter {
             bool success=false;
             for(auto &a:actors_)if(a.id==cmd.actor && a.chr && resolves(a.chr,a.handle)){
                 Vital v;if(read(a.chr,v) && v.data==a.data && v.handle==a.handle &&
-                   sc::length(v.position-player.position)<32 && v.hp>0 && !(v.bits&8)){
+                   sc::length(v.position-player.position)<64 && v.hp>0 && !(v.bits&8)){
                     if(native)success=nativeHit_.dispatch(player.chr,v.chr,player.position,v.position,v.maxHp,v.maxPosture,cmd.amount);
                     else {
                         auto target=damageHp(v.hp,v.maxHp,cmd.amount/20.,0);
@@ -155,9 +156,15 @@ class NativeCombatAdapter {
         if(!read(hero(),player)){release();return;}
         if(hero_!=player.chr || heroData_!=player.data || heroHandle_!=player.handle){release();
             hero_=player.chr;heroData_=player.data;heroHandle_=player.handle;heroId_=++nextId_;
-            session_=ackCommand_=0;damage_=heal_=0;}
+            session_=ackCommand_=0;damage_=heal_=0;dead_=false;}
+        if(dead_ && player.hp>0){
+            // Resurrection may retain ChrIns/data/handle. Give the new life a
+            // new identity so pre-death reports and queued hits cannot replay.
+            heroId_=++nextId_;session_=ackCommand_=0;damage_=heal_=0;
+        }
+        dead_=player.hp==0;
         CombatReport next;if(memory_->combatReport.read(next) && validCombat(next))report_=next;
-        bool peer=active && report_.epoch==epoch && report_.hero==heroId_ && fresh(now,report_.tick);
+        bool peer=active && player.hp>0 && report_.epoch==epoch && report_.hero==heroId_ && fresh(now,report_.tick);
         protect(player,peer && report_.invulnerable);
         if(peer){
             if(session_!=report_.session){session_=report_.session;ackCommand_=0;damage_=heal_=0;}
@@ -176,7 +183,7 @@ class NativeCombatAdapter {
             // A stationary actor may stop receiving movement callbacks. Keep it
             // while the current handle table still resolves the same entity.
             if(!resolves(a.chr,a.handle)){a={};continue;}
-            Vital v;if(!read(a.chr,v) || v.data!=a.data || v.handle!=a.handle || sc::length(v.position-player.position)>24)continue;
+            Vital v;if(!read(a.chr,v) || v.data!=a.data || v.handle!=a.handle || sc::length(v.position-player.position)>64)continue;
             auto &p=out.actors[out.count++];p.id=a.id;p.position=v.position;p.hp=v.hp;p.maxHp=v.maxHp;p.team=v.team;
             // EMEDF Enemy, StrongEnemy and hostile NPC teams; allies remain
             // individually attackable but never attract the added monster goal.

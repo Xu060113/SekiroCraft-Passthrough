@@ -41,6 +41,18 @@ public final class JniPeer {
         report.putFloat(80,Float.NaN);
         if(NativeBridge.combatReport(handle,report))throw new AssertionError("invalid injury accepted");
         report.putFloat(80,7);
+        var nativeAction=Protocol.direct(32);nativeAction.putLong(NativeBridge.clockMs()).putLong(state.epoch()).putLong(77).putInt(1).putInt(0);
+        if(!NativeBridge.nativeAction(handle,nativeAction) || NativeBridge.nativeAction(handle,Protocol.direct(31)))throw new AssertionError("native resurrection action ABI");
+        var rays=Protocol.direct(2080);rays.putLong(1).putLong(NativeBridge.clockMs()).putLong(state.epoch()).putInt(1).putInt(0)
+            .putLong(201).putFloat(12).putFloat(4).putFloat(8).putFloat(0).putFloat(-2).putFloat(0);
+        if(!NativeBridge.projectileRays(handle,rays))throw new AssertionError("native projectile request ABI");
+        rays.putFloat(52,Float.NaN);
+        if(NativeBridge.projectileRays(handle,rays))throw new AssertionError("nonfinite native projectile query accepted");
+        var rayHits=Protocol.direct(2592);
+        while(System.currentTimeMillis()<deadline && !NativeBridge.projectileHits(handle,rayHits))Thread.sleep(5);
+        if(rayHits.getInt(24)!=1 || rayHits.getLong(32)!=201 || rayHits.getFloat(44)!=3 || rayHits.getFloat(56)!=1 || rayHits.getInt(64)!=1)
+            throw new AssertionError("native projectile contact ABI");
+        if(NativeBridge.projectileHits(handle,Protocol.direct(2591)))throw new AssertionError("short native projectile destination accepted");
         var player=Protocol.direct(104);
         player.putLong(77).putLong(NativeBridge.clockMs()).putLong(state.tickMs()).putLong(state.epoch());
         player.putInt(5).putFloat(180).putFloat(12).putFloat(4).putFloat(8);

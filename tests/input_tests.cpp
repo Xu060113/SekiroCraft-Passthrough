@@ -24,6 +24,7 @@ HRESULT STDMETHODCALLTYPE state(void *, DWORD n, void *out) {
         std::memset(out, 0x80, n);
     return response;
 }
+HRESULT STDMETHODCALLTYPE zeroState(void *,DWORD n,void *out){std::memset(out,0,n);return S_OK;}
 HRESULT STDMETHODCALLTYPE data(void *, DWORD, DIDEVICEOBJECTDATA *, DWORD *n, DWORD) {
     ++nativeCalls;
     if (SUCCEEDED(response) && n) {
@@ -143,6 +144,30 @@ int main() {
             count==0 && sc::input::mouseDx.load()==oldX+3 && sc::input::mouseDy.load()==oldY-2,
             "buffered-only mouse deltas forwarded before capture and peek drain");
         sc::input::mcOwner=false;sc::input::capture=false;
+        sc::input::capture=true;sc::input::nativeKeys=true;
+        device.type=DI8DEVTYPE_KEYBOARD;
+        sc::input::stateHook<0>(&device,keyboard.size(),keyboard.data());
+        check(keyboard[DIK_G]==0x80 && keyboard[DIK_W]==0 && keyboard[DIK_E]==0,
+            "grapple key alone reaches native controls during handoff");
+        sc::input::originalState[0]=zeroState;sc::input::grappleUntil=GetTickCount64()+1000;
+        sc::input::stateHook<0>(&device,keyboard.size(),keyboard.data());
+        check(keyboard[DIK_G]==0x80 && keyboard[DIK_W]==0,"message-only fast grapple tap survives release before native poll");
+        count=4;sc::input::dataHook<0>(&device,sizeof(events[0]),events,&count,0);
+        check(count==1 && events[0].dwOfs==DIK_G && events[0].dwData==0x80,"buffered grapple tap down");
+        sc::input::grappleUntil=0;count=4;sc::input::dataHook<0>(&device,sizeof(events[0]),events,&count,0);
+        check(count==1 && events[0].dwData==0,"buffered grapple tap release");
+        sc::input::originalState[0]=state;
+        device.type=DI8DEVTYPE_MOUSE;sc::input::attackUntil=GetTickCount64()+1000;
+        sc::input::stateHook<0>(&device,sizeof(mouse),&mouse);
+        check(mouse.rgbButtons[0]==0x80 && mouse.rgbButtons[1]==0 && mouse.lX==0,
+            "native finisher pulse never leaks inventory/use/camera input");
+        count=4;sc::input::dataHook<0>(&device,sizeof(events[0]),events,&count,0);
+        check(count==1 && events[0].dwOfs==DIMOFS_BUTTON0 && events[0].dwData==0x80,"buffered native attack down");
+        count=4;sc::input::dataHook<0>(&device,sizeof(events[0]),events,&count,0);
+        check(count==0,"held finisher pulse does not manufacture repeat downs");
+        sc::input::attackUntil=0;count=4;sc::input::dataHook<0>(&device,sizeof(events[0]),events,&count,0);
+        check(count==1 && events[0].dwData==0,"buffered native attack releases");
+        sc::input::nativeKeys=false;sc::input::capture=false;
         check(MH_Initialize() == MH_OK, "MinHook init");
         check(sc::input::install(), "real system DirectInput hook installation");
         // This creates system devices but never acquires, reads a user's keystroke,

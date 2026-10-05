@@ -55,3 +55,33 @@ try{& "$($f.dir)\scripts\update-installed.ps1" -MinecraftDirectory $f.mc | Out-N
 Check $failed 'unverified package rejected'
 Check ((Get-Content "$($f.game)\dinput8.dll") -eq 'old host') 'checksum failure leaves installed host unchanged'
 Write-Output "$checks paired update, checksum, backup and rollback checks passed (isolated fake directories)."
+function LifeFixture([string]$name){
+    $f=Fixture $name
+    Set-Content -LiteralPath "$($f.game)\sekirobridge.ini" -Value "[SekiroBridge]`nenabled=1`ny_offset=137`ndata_root=custom/path`ncombat_trace=1`nnative_hits=1"
+    $r=Get-Content "$($f.dir)\runtime\installation.json" -Raw|ConvertFrom-Json
+    $r.files[1].sha256=(Get-FileHash "$($f.game)\sekirobridge.ini").Hash
+    $r|ConvertTo-Json -Depth 6|Set-Content "$($f.dir)\runtime\installation.json"
+    $manifest=Get-Content "$($f.dir)\build\verification.json" -Raw|ConvertFrom-Json
+    $manifest.patch='gameplay3-life-actions-projectiles';$manifest|ConvertTo-Json -Depth 6|Set-Content "$($f.dir)\build\verification.json"
+    @{active=$true}|ConvertTo-Json|Set-Content "$($f.dir)\runtime\combat-trace-session.json"
+    return $f
+}
+$f=LifeFixture 'life-success'
+& "$($f.dir)\scripts\update-installed.ps1" -MinecraftDirectory $f.mc|Out-Null
+$ini=Get-Content "$($f.game)\sekirobridge.ini" -Raw
+Check ($ini -match 'y_offset=137' -and $ini -match 'data_root=custom/path') 'life update preserves calibrated config'
+Check ($ini -match 'combat_trace=0' -and $ini -match 'native_hits=0' -and $ini -notmatch 'combat_trace=1') 'life update disables recorder and unaccepted preview hits'
+$r=Get-Content "$($f.dir)\runtime\installation.json" -Raw|ConvertFrom-Json
+Check ($r.files[1].sha256 -eq (Get-FileHash "$($f.game)\sekirobridge.ini").Hash) 'config restore ownership updated'
+Check (!(Get-Content "$($f.dir)\runtime\combat-trace-session.json" -Raw|ConvertFrom-Json).active) 'trace session retired'
+$f=LifeFixture 'life-rollback';$before=(Get-FileHash "$($f.game)\sekirobridge.ini").Hash
+function Move-Item {
+    param([string]$LiteralPath,[string]$Destination,[switch]$Force)
+    if($Destination.EndsWith('sekiro-minecraft-passthrough-0.1.0.jar')){throw 'forced JAR failure'}
+    Microsoft.PowerShell.Management\Move-Item @PSBoundParameters
+}
+$failed=$false;try{& "$($f.dir)\scripts\update-installed.ps1" -MinecraftDirectory $f.mc|Out-Null}catch{$failed=$true}
+Remove-Item Function:\Move-Item
+Check ($failed -and (Get-FileHash "$($f.game)\sekirobridge.ini").Hash -eq $before) 'failure rolls config back with both peers'
+Check ((Get-Content "$($f.dir)\runtime\combat-trace-session.json" -Raw|ConvertFrom-Json).active) 'failed update retains prior trace session'
+Write-Output "$checks total paired-update and life/action rollback checks passed."

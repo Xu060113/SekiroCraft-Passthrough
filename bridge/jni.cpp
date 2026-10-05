@@ -3,6 +3,25 @@
 
 // Handles are owned by NativeBridge and used on Minecraft's render thread only.
 extern "C" {
+JNIEXPORT jboolean JNICALL Java_dev_sekirobridge_NativeBridge_projectileRays(JNIEnv *env,jclass,jlong handle,jobject b) {
+    if(!handle || !b || env->GetDirectBufferCapacity(b)<jlong(sizeof(bridge::ProjectileRays)))return false;
+    auto ptr=env->GetDirectBufferAddress(b);if(!ptr)return false;
+    bridge::ProjectileRays p;std::memcpy(&p,ptr,sizeof(p));
+    return bridge::validRays(p) && reinterpret_cast<bridge::SharedMemory*>(handle)->projectileRays.write(p);
+}
+JNIEXPORT jboolean JNICALL Java_dev_sekirobridge_NativeBridge_projectileHits(JNIEnv *env,jclass,jlong handle,jobject b) {
+    if(!handle || !b || env->GetDirectBufferCapacity(b)<jlong(sizeof(bridge::ProjectileHits)))return false;
+    auto ptr=env->GetDirectBufferAddress(b);if(!ptr)return false;
+    bridge::ProjectileHits p;
+    if(!reinterpret_cast<bridge::SharedMemory*>(handle)->projectileHits.read(p) || !bridge::validHits(p))return false;
+    std::memcpy(ptr,&p,sizeof(p));return true;
+}
+JNIEXPORT jboolean JNICALL Java_dev_sekirobridge_NativeBridge_nativeAction(JNIEnv *env,jclass,jlong handle,jobject b) {
+    if(!handle || !b || env->GetDirectBufferCapacity(b)<jlong(sizeof(bridge::NativeActionRequest)))return false;
+    auto ptr=env->GetDirectBufferAddress(b);if(!ptr)return false;
+    bridge::NativeActionRequest p;std::memcpy(&p,ptr,sizeof(p));
+    return bridge::validAction(p) && reinterpret_cast<bridge::SharedMemory*>(handle)->nativeAction.write(p);
+}
 JNIEXPORT jlong JNICALL Java_dev_sekirobridge_NativeBridge_open(JNIEnv *env, jclass, jstring channel) {
     if (!channel)
         return 0;

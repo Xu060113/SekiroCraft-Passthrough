@@ -38,11 +38,7 @@ public final class CombatBridge {
         FabricDefaultAttributeRegistry.register(TYPE,MobEntity.createMobAttributes());
     }
     public static void initialize(){
-        EntityRendererRegistry.register(TYPE,context -> new EntityRenderer<NativeActorProxy>(context){
-            @Override public Identifier getTexture(NativeActorProxy actor){return new Identifier("minecraft","textures/misc/white.png");}
-            @Override public void render(NativeActorProxy actor,float yaw,float delta,
-                net.minecraft.client.util.math.MatrixStack matrices,net.minecraft.client.render.VertexConsumerProvider buffers,int light){}
-        });
+        EntityRendererRegistry.register(TYPE,NativeActorRenderer::new);
     }
     private static boolean usable(){var s=BridgeClient.state();var c=MinecraftClient.getInstance();
         return BridgeClient.armed() && s!=null && (s.capabilities()&1024)!=0 && Protocol.fresh(NativeBridge.clockMs(),s.tickMs()) &&
@@ -85,14 +81,14 @@ public final class CombatBridge {
         double ad=s.ackSession()==session?s.ackDamage():0,ah=s.ackSession()==session?s.ackHeal():0;
         boolean nativeHurt=hurtFeedback.update((double)s.hp()/s.maxHp(),ad,ah,immune);
         float maximum=p.getMaxHealth();
-        double ratio=health.synchronize(p.getHealth()/maximum,(double)s.hp()/s.maxHp(),ad,ah,immune);
+        double ratio=health.synchronize(p.getHealth()/maximum,(double)s.hp()/s.maxHp(),ad,ah,immune,p.isAlive());
         // Use vanilla's death path, rather than setting zero and bypassing onDeath.
         if(s.hp()==0 && p.isAlive() && !immune)p.damage(p.getDamageSources().genericKill(),Float.MAX_VALUE);
         else if(p.isAlive())p.setHealth((float)(ratio*maximum));
         if(nativeHurt && p.isAlive())p.networkHandler.sendPacket(
             new net.minecraft.network.packet.s2c.play.EntityDamageS2CPacket(p,p.getDamageSources().generic()));
         var keep=new HashSet<Long>();
-        if(BridgeClient.connected())for(var a:s.actors()){
+        if(BridgeClient.connected() && p.isAlive())for(var a:s.actors()){
             if(a.hp()==0)continue;keep.add(a.id());var proxy=proxies.get(a.id());
             if(proxy==null || proxy.isRemoved() || proxy.getWorld()!=p.getWorld()){
                 if(proxy!=null)proxy.discard();proxy=TYPE.create(p.getServerWorld());if(proxy==null)continue;

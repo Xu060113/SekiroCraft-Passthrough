@@ -22,6 +22,8 @@ class NativeDriver {
     bool enabled_{}, installed_{}, rayReady_{};
     uint64_t retry_{}, terrainTick_{}, terrainSequence_{};
     uint64_t terrainEpoch_{};unsigned terrainPatch_{};bool outerPatch_{};
+    uint64_t raySequence_{},rayEpoch_{};
+    ProjectileHits rayHits_{};
     static inline NativeDriver *instance_{};
     using CastRay=bool(*)(uintptr_t,uint32_t,const float*,const float*,float*,float*,float*,uintptr_t*);
     static void cameraCallback(uintptr_t camera) noexcept {if(instance_)instance_->camera(camera);}
@@ -31,6 +33,33 @@ class NativeDriver {
         return enabled_ && (player_.flags&1) && player_.epoch==control_.epoch &&
             fresh(now,player_.tick,150) && fresh(now,player_.controlTick) &&
             sc::length(player_.position-sc::Vec3{control_.player[0],control_.player[1],control_.player[2]})<5;
+    }
+    void projectileRays(uint64_t now,uint64_t epoch) {
+        if(!rayReady_)return;
+        if(rayEpoch_!=epoch){rayEpoch_=epoch;raySequence_=0;rayHits_={};}
+        // Retry an unconsumed IPC write without repeating native casts.
+        if(rayHits_.sequence && fresh(now,rayHits_.tick))memory_->projectileHits.write(rayHits_);
+        ProjectileRays queries;
+        if(!memory_->projectileRays.read(queries) || !validRays(queries) || queries.epoch!=epoch ||
+            !fresh(now,queries.tick) || queries.sequence==raySequence_)return;
+        uintptr_t manager{},world{};
+        if(!sc::readMemory(base_+0x3d6d640,manager) || !sc::readMemory(manager+0x98,world) || world<65536)return;
+        ProjectileHits result;result.sequence=queries.sequence;result.tick=now;result.epoch=epoch;result.count=queries.count;
+        auto cast=reinterpret_cast<CastRay>(base_+0x94cc50);
+        for(size_t i=0;i<queries.count;++i){const auto &q=queries.rays[i];auto &r=result.hits[i];r.id=q.id;
+            alignas(16) float start[4]{q.start.x,q.start.y,q.start.z,1};
+            alignas(16) float delta[4]{q.delta.x,q.delta.y,q.delta.z,0},hit[4]{},normal[4]{};
+            float fraction{};uintptr_t object{};
+            bool found=sc::length(q.delta)>.00001f && cast(world,0x4e,start,delta,hit,normal,&fraction,&object);
+            r.position={hit[0],hit[1],hit[2]};r.normal={normal[0],normal[1],normal[2]};
+            // Native filters are not assumed to be a segment clamp: validate the
+            // returned point before it is allowed to stop a Minecraft arrow.
+            auto length2=sc::dot(q.delta,q.delta);auto t=length2>0?sc::dot(r.position-q.start,q.delta)/length2:0;
+            r.hit=found && sc::finite(r.position) && sc::finite(r.normal) && t>=-.001f && t<=1.001f &&
+                sc::length(r.position-(q.start+q.delta*t))<.05f && sc::length(r.normal)>.5f && sc::length(r.normal)<1.5f;
+            if(!r.hit){r.position={};r.normal={};}
+        }
+        if(validHits(result)){rayHits_=result;raySequence_=queries.sequence;memory_->projectileHits.write(rayHits_);}
     }
     void terrain(uint64_t now,uint64_t epoch,sc::Vec3 center) {
         if(!rayReady_ || now-terrainTick_<50)return;
@@ -102,6 +131,7 @@ class NativeDriver {
         // Ray work cannot hold the state mutex and make a camera/control update
         // miss its zero-wait lock and fall back to the native wolf camera.
         lock.unlock();
+        projectileRays(now,epoch);
         terrain(now,epoch,center);
         if(have)controlledMoves.fetch_add(1);
         return have;

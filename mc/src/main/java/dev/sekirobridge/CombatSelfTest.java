@@ -20,6 +20,14 @@ public final class CombatSelfTest {
         l.synchronize(0,.6,d,h,true);
         check(l.damage==d,"creative health loss cannot damage native player");
         l.reset();check(!l.seeded && l.damage==0 && l.heal==0,"new hero resets ledger");
+        l.synchronize(1,.6,0,0,false,true);
+        check(l.synchronize(0,0,0,0,false,false)==0 && l.damage==0,"native death freezes the dead MC entity");
+        for(int i=0;i<20;++i)l.synchronize(0,.5,0,0,false,false);
+        check(l.damage==0,"restored native HP cannot bounce off the still dead MC entity");
+        l.reset();check(l.synchronize(1,.5,0,0,false,true)==.5 && l.damage==0,"new life seeds after native resurrection");
+        l.reset();l.synchronize(1,1,0,0,false,true);l.synchronize(0,1,0,0,false,false);
+        check(l.damage==1,"a real MC death reports one final native injury");
+        l.synchronize(0,1,0,0,false,false);check(l.damage==1,"dead snapshots never repeat final injury");
         var hurt=new NativeHurtFeedback();
         check(!hurt.update(1,0,0,false),"first native life snapshot has no hurt event");
         check(hurt.update(.8,0,0,false),"native HP injury emits feedback");

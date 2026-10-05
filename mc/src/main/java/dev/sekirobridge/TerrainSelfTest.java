@@ -87,6 +87,13 @@ public final class TerrainSelfTest {
             "native virtual terrain only exposes top faces");
         require(TerrainGeometry.raycast(fractional,1100,new Vec3d(.5,11,-.5),new Vec3d(.5,9.5,-.5))==null,
             "nearest real MC target clips native ray before rounding its placement cell");
+        var arrowHit=TerrainGeometry.projectileRaycast(fractional,1100,new Vec3d(.5,11,-.5),new Vec3d(.5,7,-.5));
+        require(arrowHit!=null && arrowHit.getPos().y==9.2,"arrow contact uses exact floor, without placement rounding");
+        require(TerrainGeometry.projectileRaycast(fractional,2700,new Vec3d(.5,11,-.5),new Vec3d(.5,7,-.5))==null,"stale projectile floor cannot become invisible geometry");
+        var start=new Vec3d(0,1,0);var end=new Vec3d(4,1,0);
+        require(ProjectileTerrain.validHit(start,end,new Vec3d(2,1,0),new Vec3d(-1,0,0),1),"native wall contact lies on arrow segment");
+        require(!ProjectileTerrain.validHit(start,end,new Vec3d(8,1,0),new Vec3d(-1,0,0),1),"out-of-segment native contact rejected");
+        require(!ProjectileTerrain.validHit(start,end,new Vec3d(2,3,0),new Vec3d(-1,0,0),1),"off-segment native contact rejected");
         var clientWorld=new Object();var serverWorld=new Object();
         var scope=new TerrainEntityPolicy.Scope(clientWorld,serverWorld);
         require(TerrainEntityPolicy.applies(scope,serverWorld,net.minecraft.entity.TntEntity.class),"ignited TNT on integrated server receives terrain");

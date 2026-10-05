@@ -38,4 +38,7 @@ public final class NativeBridge {
     public static native boolean terrain(long handle, ByteBuffer packet);
     public static native boolean combatState(long handle, ByteBuffer packet);
     public static native boolean combatReport(long handle, ByteBuffer packet);
+    public static native boolean nativeAction(long handle, ByteBuffer packet);
+    public static native boolean projectileRays(long handle, ByteBuffer packet);
+    public static native boolean projectileHits(long handle, ByteBuffer packet);
 }

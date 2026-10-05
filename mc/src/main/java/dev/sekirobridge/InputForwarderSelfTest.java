@@ -141,6 +141,18 @@ public final class InputForwarderSelfTest {
         target.calls.clear();target.geometry=1;input.update(control(232,Protocol.EDIT,0),packet(232,17),232);
         check(target.calls.size()==1,"resized window refreshes pointer scaling");
         input.release();
+        target.screen=false;input.update(control(240,Protocol.EDIT,0),packet(240,17),240);
+        var nativeKeys=packet(250,19);event(nativeKeys,17,1,'G',1,0,0,0);event(nativeKeys,18,1,'R',1,0,0,0);
+        input.update(control(250,Protocol.EDIT,0,'G','R'),nativeKeys,250);
+        check(!input.held('G') && !input.held('R'),"native grapple and finisher keys never trigger Minecraft gameplay bindings");
+        var action=packet(260,20);event(action,19,1,'W',1,0,0,0);
+        input.update(control(260,Protocol.EDIT|Protocol.NATIVE_ACTION,0,'W'),action,260);
+        check(!input.held('W'),"native root motion owns movement during the handoff");
+        input.release();target.screen=true;input.update(control(270,Protocol.EDIT|Protocol.NATIVE_DEAD,0),packet(270,20),270);
+        var deathClick=packet(280,22);event(deathClick,20,2,0,1,0,.5f,.5f);event(deathClick,21,2,0,0,0,.5f,.5f);
+        target.calls.clear();input.update(control(280,Protocol.EDIT|Protocol.NATIVE_DEAD,0),deathClick,280);
+        check(target.presses(0)==1 && target.releases(0)==1,"native death retains ordered death-screen mouse clicks");
+        input.release();
         System.out.println("PASS "+checks+" production input replay checks");
     }
 }
