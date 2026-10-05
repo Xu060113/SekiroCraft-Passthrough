@@ -170,6 +170,7 @@ struct App {
     RECT previousClip{};
     bridge::Control control;
     bridge::ActionHandoff action;
+    uint64_t traversalStarted{};
     uint64_t actionRequestSeen{},actionRequestTick{};
     std::string status = "Waiting for Minecraft and a playable Sekiro scene.";
     std::string worldReason = "Waiting for a completed world frame.", overlayReason;
@@ -239,17 +240,25 @@ struct App {
         if(requested){actionRequestSeen=request.sequence;actionRequestTick=request.tick;}
         auto now=GetTickCount64();
         auto animation=bridge::readNativeAnimation(host.base());
+        bool traversalHeld=gameplay && ((GetAsyncKeyState('G')&0x8000) || (GetAsyncKeyState(int(grappleKey))&0x8000));
+        if(traversalHeld && !action.active())action.begin(now,animation);
         if((gameplay && (grapple || attack)) || (actionAllowed && dead && (attack || requested))){
             bool accepted=dead || action.begin(now,animation);
             if(accepted && (attack || requested))sc::input::attackUntil=now+180;
             if(accepted && grapple)sc::input::grappleUntil=now+180;
         }
-        if(gameplay && ((GetAsyncKeyState('G')&0x8000) || (GetAsyncKeyState(int(grappleKey))&0x8000)))sc::input::grappleUntil=
-            std::max(sc::input::grappleUntil.load(),now+50);
-        bool handoff=action.update(now,animation,mcOwner && focused && !dead,nativeUI || showMenu);
+        if(traversalHeld){
+            if(!traversalStarted)traversalStarted=now;
+            // The native action may only become eligible after gravity/ground
+            // state resumes or a jump reaches a hook point. Supply new edges,
+            // rather than one indefinitely-held press rejected on entry.
+            sc::input::grappleUntil=(now-traversalStarted)%300<180?now+80:0;
+        }else traversalStarted=0;
+        bool handoff=action.update(now,animation,mcOwner && focused && !dead,nativeUI || showMenu,traversalHeld);
         combatTrace.animation(animation,(handoff?1u:0u)|(action.confirmed()?2u:0u)|(attack?4u:0u)|
             (grapple?8u:0u)|(nativeUI?16u:0u)|(mcOwner?32u:0u));
         sc::input::nativeKeys=actionAllowed && (dead || handoff);
+        sc::input::nativeTraversal=actionAllowed && handoff && (traversalHeld || sc::input::grappleHeld());
         if(!sc::input::nativeKeys){sc::input::attackUntil=0;sc::input::grappleUntil=0;}
         sc::input::mcOwner=mcOwner && focused;
         sc::input::capture = capturing || (mcOwner && focused && edit && !nativeUI);
@@ -1042,6 +1051,9 @@ DWORD WINAPI scBootstrap(void *) {
         if(GetPrivateProfileIntW(L"SekiroBridge",L"native_phase_finish",0,config.c_str()))
             sc::log(app->combat.enablePhaseFinishes(true)?"Candidate remote stage profile enabled for directed acceptance.":
                 "Remote stage profile disabled: native signatures unavailable.");
+        if(GetPrivateProfileIntW(L"SekiroBridge",L"auto_boss_phases",0,config.c_str()))
+            sc::log(app->combat.enableAutoBossPhases(app->combat.nativeHits())?
+                "Simplified HP-depleted Boss stage completion enabled.":"Auto Boss stages unavailable: combat/node signatures missing.");
         sc::log(sc::input::install() ? "DirectInput capture installed." : "DirectInput capture unavailable.");
         auto user = GetModuleHandleW(L"user32.dll");
         for (auto item : std::array<std::tuple<const char *, void *, void **>, 2>{

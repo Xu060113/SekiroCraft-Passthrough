@@ -184,6 +184,8 @@ int main(int argc, char **argv) {
     require(handoff.update(4000,finisher,true),"long finisher remains native until animation ends");
     require(handoff.update(4016,idle,true) && !handoff.update(4032,idle,true),"control returns within two samples without a 6.5s minimum");
     handoff.begin(5000,idle);require(!handoff.update(5500,idle,true),"rejected request does not freeze MC for seconds");
+    handoff.begin(5600,idle);require(handoff.update(6600,idle,true,false,true),"held grapple allows native run/jump before animation confirmation");
+    require(!handoff.update(7100,idle,true),"unconfirmed traversal releases after key-up");
     handoff.begin(6000,idle);require(!handoff.update(6016,finisher,false),"death/focus loss releases handoff");
     handoff.begin(7000,idle);require(!handoff.update(28000,finisher,true),"stuck action has bounded ownership");
     handoff.begin(29000,idle);auto respawn=finisher;respawn.hero=101;

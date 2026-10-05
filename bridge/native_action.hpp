@@ -24,12 +24,15 @@ class ActionHandoff {
         if(active() || !animation.valid)return false;
         started_=sampleAt_=now;baseline_=animation;confirmed_=false;idleSamples_=0;return true;
     }
-    bool update(uint64_t now,NativeAnimation animation,bool allowed,bool paused=false){
+    bool update(uint64_t now,NativeAnimation animation,bool allowed,bool paused=false,bool traversalHeld=false){
         if(!allowed || !animation.valid || animation.hero!=baseline_.hero || animation.module!=baseline_.module){reset();return false;}
         if(!started_)return false;
         if(now<sampleAt_){reset();return false;}
         if(paused){started_+=now-sampleAt_;sampleAt_=now;return true;}
         sampleAt_=now;
+        // A held traversal key owns native movement even before a grapple is
+        // eligible. The player must be able to jump/run to acquire that target.
+        if(traversalHeld){started_=now;idleSamples_=0;return true;}
         bool idle=animation.id==baseline_.id || nativeGroundIdle(animation.id);
         if(!idle){confirmed_=true;idleSamples_=0;}
         else if(confirmed_ && ++idleSamples_>=2){reset();return false;}

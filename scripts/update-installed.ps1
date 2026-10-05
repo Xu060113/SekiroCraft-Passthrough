@@ -1,5 +1,5 @@
 param([string]$MinecraftDirectory='E:\.minecraft\versions\1.20.1-Fabric 0.16.10',[switch]$Diagnostic,
-      [string]$NativeGrappleKey='')
+      [string]$NativeGrappleKey='',[switch]$AutoBossPhases)
 $ErrorActionPreference='Stop'
 if($NativeGrappleKey -and $NativeGrappleKey -notmatch '^[A-Za-z]$'){throw 'NativeGrappleKey must be a single letter matching the Sekiro binding.'}
 function Get-OwnedRelativePath([string]$Root,[string]$Path){
@@ -22,6 +22,7 @@ if(!$manifest.verified -or $manifest.patch -notin @('gameplay2-combatfix1','game
 $guiPatch=$manifest.patch -eq 'gameplay4-gui-native-combat'
 if($guiPatch -and $manifest.protocol -ne 2){throw 'Expected paired protocol v2.'}
 if($Diagnostic -and !$guiPatch){throw 'Diagnostic mode requires the paired GUI/native combat package.'}
+if($AutoBossPhases -and (!$guiPatch -or 'HP-depleted Boss stage mode' -notin $manifest.experimental)){throw 'Build a paired package supporting HP-depleted Boss stages first.'}
 $gameRoot=[IO.Path]::GetFullPath($record.gameDirectory)
 $mcRoot=[IO.Path]::GetFullPath($MinecraftDirectory)
 if($manifest.gameSha256 -and (Get-FileHash -LiteralPath (Join-Path $gameRoot 'sekiro.exe')).Hash -ne $manifest.gameSha256){throw 'Verified Sekiro executable changed.'}
@@ -75,9 +76,10 @@ try {
         if($ini -notmatch '(?im)^\[SekiroBridge\]'){throw 'Expected SekiroBridge INI section is missing.'}
         $ini=[regex]::Replace($ini,'(?is)(\[SekiroBridge\][^\r\n]*\r?\n)(.*?)(?=\r?\n\[|$)',{
             param($match)
-            $body=[regex]::Replace($match.Groups[2].Value,'(?im)^\s*(combat_trace|native_hits|native_phase_finish)\s*=.*(?:\r?\n|$)','')
+            $body=[regex]::Replace($match.Groups[2].Value,'(?im)^\s*(combat_trace|native_hits|native_phase_finish|auto_boss_phases)\s*=.*(?:\r?\n|$)','')
             $preview=[int][bool]$Diagnostic
-            $match.Groups[1].Value+$body.TrimEnd()+"`r`ncombat_trace=$preview`r`nnative_hits=$preview`r`nnative_phase_finish=0`r`n"
+            $hits=[int]([bool]$Diagnostic -or [bool]$AutoBossPhases);$auto=[int][bool]$AutoBossPhases
+            $match.Groups[1].Value+$body.TrimEnd()+"`r`ncombat_trace=$preview`r`nnative_hits=$hits`r`nnative_phase_finish=0`r`nauto_boss_phases=$auto`r`n"
         })
         if($NativeGrappleKey){
             $ini=[regex]::Replace($ini,'(?im)^\s*grapple_key\s*=.*(?:\r?\n|$)','')

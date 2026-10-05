@@ -5,6 +5,8 @@ import dev.sekirobridge.NativeTerrain;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.GameRenderer;
 import net.minecraft.item.BlockItem;
+import net.minecraft.item.SpawnEggItem;
+import net.minecraft.item.Item;
 import net.minecraft.util.hit.HitResult;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -13,14 +15,15 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(GameRenderer.class)
 public abstract class TerrainTargetMixin {
+    private static boolean groundUse(Item item){return item instanceof BlockItem || item instanceof SpawnEggItem;}
     @Inject(method="updateTargetedEntity",at=@At("RETURN"))
     private void nativePlacementTarget(float tickDelta,CallbackInfo ci){
         if(!BridgeClient.active())return;
         var c=MinecraftClient.getInstance();
         var camera=c.getCameraEntity();
         if(c.player==null || camera==null || c.interactionManager==null ||
-            !(c.player.getMainHandStack().getItem() instanceof BlockItem) &&
-            !(c.player.getOffHandStack().getItem() instanceof BlockItem))return;
+            !groundUse(c.player.getMainHandStack().getItem()) &&
+            !groundUse(c.player.getOffHandStack().getItem()))return;
         var start=camera.getCameraPosVec(tickDelta);
         var current=c.crosshairTarget;
         double reach=c.interactionManager.getReachDistance();

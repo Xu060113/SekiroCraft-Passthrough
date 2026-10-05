@@ -18,6 +18,7 @@ inline std::atomic<bool> mcEdit{false};
 inline std::atomic<bool> flying{false};
 inline std::atomic<bool> mcOwner{false};
 inline std::atomic<bool> nativeKeys{false};
+inline std::atomic<bool> nativeTraversal{false};
 inline std::atomic<bool> nativeUI{false};
 inline std::atomic<uint64_t> attackUntil{};
 inline std::atomic<uint64_t> grappleUntil{};
@@ -31,6 +32,9 @@ inline bool configureGrapple(wchar_t key){
 }
 inline std::array<std::atomic<bool>,4> bufferedAttack{};
 inline std::array<std::atomic<bool>,4> bufferedGrapple{};
+inline std::array<std::array<uint8_t,256>,4> bufferedTraversal{};
+inline bool traversalKey(DWORD key){return key==DIK_W || key==DIK_A || key==DIK_S || key==DIK_D ||
+    key==DIK_SPACE || key==DIK_LSHIFT || key==DIK_RSHIFT || key==DIK_LCONTROL || key==DIK_RCONTROL;}
 inline bool attackHeld(){return GetTickCount64()<attackUntil.load(std::memory_order_relaxed);}
 inline bool grappleHeld(){return GetTickCount64()<grappleUntil.load(std::memory_order_relaxed);}
 inline std::atomic<int64_t> mouseDx{},mouseDy{};
@@ -84,7 +88,12 @@ template <int I> inline HRESULT STDMETHODCALLTYPE stateHook(void *device, DWORD 
     // rather than guessing from its custom data format's buffer length.
     if (SUCCEEDED(result) && out && capture.load(std::memory_order_relaxed) && keyboardOrMouse(device)) {
         auto type=deviceType(device);
+        std::array<uint8_t,256> movement{};
+        if(type==DI8DEVTYPE_KEYBOARD && size==256 && nativeKeys && nativeTraversal)
+            for(DWORD k=0;k<256;++k)if(traversalKey(k))movement[k]=static_cast<uint8_t*>(out)[k];
         std::memset(out, 0, size);
+        if(type==DI8DEVTYPE_KEYBOARD && size==256)
+            for(DWORD k=0;k<256;++k)if(movement[k])static_cast<uint8_t*>(out)[k]=movement[k];
         if(type==DI8DEVTYPE_KEYBOARD && size==256 && nativeKeys && grappleHeld())
             static_cast<uint8_t*>(out)[grappleScan.load(std::memory_order_relaxed)]=0x80;
         if(type==DI8DEVTYPE_MOUSE && (size==sizeof(DIMOUSESTATE) || size==sizeof(DIMOUSESTATE2)) && nativeKeys && attackHeld())
@@ -135,6 +144,15 @@ inline HRESULT STDMETHODCALLTYPE dataHook(void *device, DWORD size, DIDEVICEOBJE
             bool held=nativeKeys && grappleHeld();bool old=bufferedGrapple[I].exchange(held);
             if(old!=held){DIDEVICEOBJECTDATA event{};event.dwOfs=grappleScan.load(std::memory_order_relaxed);event.dwData=held?0x80:0;
                 event.dwTimeStamp=DWORD(GetTickCount64());out[written++]=event;}
+            // Use a state snapshot, rather than replaying buffered events that
+            // belonged to MC. Track releases, including GUI/focus interruption.
+            std::array<uint8_t,256> keys{};
+            if(nativeKeys && nativeTraversal)originalState[I](device,256,keys.data());
+            for(DWORD k=0;k<256 && written<capacity;++k)if(traversalKey(k)){
+                uint8_t down=keys[k]&0x80;
+                if(down!=bufferedTraversal[I][k]){DIDEVICEOBJECTDATA event{};event.dwOfs=k;event.dwData=down;
+                    event.dwTimeStamp=DWORD(GetTickCount64());out[written++]=event;bufferedTraversal[I][k]=down;}
+            }
         }
         *count = written;
     } else if (SUCCEEDED(result) && out && count && size == sizeof(DIDEVICEOBJECTDATA) &&

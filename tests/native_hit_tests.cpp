@@ -8,7 +8,7 @@ uint32_t scTraceBeforeMxcsr{},scTraceChangedMxcsr{},scTraceObservedMxcsr{};
 uint32_t scTraceVector[4]{0x12345678,0x87654321,0xabcdef01,0x10fedcba},scTraceObservedVectors[24]{};
 }
 static uintptr_t targetChr{},targetData{},attackerChr{},paramRow{};
-static int hitCalls{},initCalls{},hpCalls{},lookupCalls{};static bool hasParam=true;
+static int hitCalls{},initCalls{},hpCalls{},lookupCalls{},phaseCalls{};static bool hasParam=true;
 static sc::Vec3 lastPoint{},lastDirection{};
 template<class T>T field(uintptr_t p,size_t at){T value;std::memcpy(&value,reinterpret_cast<void*>(p+at),sizeof(value));return value;}
 template<class T>void store(uintptr_t p,size_t at,T value){std::memcpy(reinterpret_cast<void*>(p+at),&value,sizeof(value));}
@@ -19,13 +19,17 @@ static uintptr_t init(void *packet){++initCalls;auto p=reinterpret_cast<uintptr_
     for(auto at:{0x8cu,0x90u,0x94u,0x98u,0x9cu})store(p,at,int32_t(-1));return p;
 }
 static void param(void *ref,int32_t category,int32_t id){++lookupCalls;
-    if(category!=1 || id!=5000010)throw std::runtime_error("PC grounded normal attack lookup ABI");
+    if(category!=1 || (id!=5000010 && id!=5000600))throw std::runtime_error("PC attack lookup ABI");
     store(reinterpret_cast<uintptr_t>(ref),0,id);store(reinterpret_cast<uintptr_t>(ref),0x10,hasParam?paramRow:0);
 }
 static void hit(uintptr_t module,uintptr_t source,void *packet){auto p=reinterpret_cast<uintptr_t>(packet);
     if(field<uintptr_t>(module,8)!=targetChr || source!=attackerChr ||
        field<uintptr_t>(p,0x190)!=source || field<uintptr_t>(p,0x198)!=targetChr)
         throw std::runtime_error("fresh native ownership/three argument ABI");
+    if(field<int32_t>(p,0x28)==5){
+        if(field<int32_t>(p,0x50)!=5000600 || !bridge::bridgeVitalWriteDepth)throw std::runtime_error("native phase ABI");
+        ++phaseCalls;store(targetData,0x25c,field<int32_t>(targetData,0x25c)-1);store(targetData,0x130,int32_t(1));return;
+    }
     if(field<int32_t>(p,0x28)!=1 || field<int32_t>(p,0x50)!=5000010 || field<int32_t>(p,0x54)!=1)
         throw std::runtime_error("normal hit must never manufacture a deathblow");
     if(field<int32_t>(p,0x24)!=2 || field<float>(p,0x34)!=15 || field<float>(p,0x38)!=30 ||
@@ -47,7 +51,13 @@ static void hit(uintptr_t module,uintptr_t source,void *packet){auto p=reinterpr
     store(p,0x1e0,123.f); // Native mutable scratch is confined to this dispatch.
 }
 static uintptr_t find(uintptr_t,uint32_t handle){return handle==456?targetChr:0;}
-static void hp(uintptr_t data,int32_t value){++hpCalls;store(data,0x130,value);}
+static void hp(uintptr_t data,int32_t value){++hpCalls;
+    if(value==0 && (field<uint8_t>(data,0x228)&4))value=1;
+    store(data,0x130,value);
+}
+static void posture(uintptr_t data,int32_t value,uint8_t recovery){
+    if(recovery!=1)throw std::runtime_error("stage recovery ABI");store(data,0x148,value);
+}
 int main(){int checks{};auto check=[&](bool ok,const char *message){++checks;if(!ok)throw std::runtime_error(message);};
     scCombatGameCallback=scTraceGameClobber;
     scCombatGameContinue=reinterpret_cast<void*>(scTraceTarget);
@@ -67,12 +77,14 @@ int main(){int checks{};auto check=[&](bool ok,const char *message){++checks;if(
     bytes(0xa4a050,{0x48,0x83,0xec,0x28,0xe8,0x37,0xff,0xff,0xff,0x48,0x85,0xc0,0x74,0x08,0x48,0x8b});
     bytes(0xbd6710,{0x48,0x89,0x6c,0x24,0x18,0x48,0x89,0x74,0x24,0x20,0x57,0x48,0x83,0xec,0x20,0x41});
     bytes(0xbd679a,{0x89,0x87,0x48,0x01,0,0,0x85,0xdb});
+    bytes(0xb6e800,{0x89,0x91,0x5c,0x02,0,0});
     bridge::SharedMemory memory;check(memory.open(L"native-hit-test-"+std::to_wstring(GetCurrentProcessId())),"combat channels");
     bridge::NativeCombatAdapter adapter;adapter.initialize(base,memory);check(adapter.ready() && adapter.prepareNativeHits(),"production code gates accept verified image");
     image[0x997cf0]=0;bridge::NativeHitBackend disabled;check(!disabled.initialize(base),"changed parent initializer refuses dispatch");image[0x997cf0]=0x80;
     auto stub=[&](size_t at,uintptr_t function){uint8_t jump[]{0x48,0xb8,0,0,0,0,0,0,0,0,0xff,0xe0};std::memcpy(jump+2,&function,8);std::memcpy(image+at,jump,12);};
     stub(0x997890,reinterpret_cast<uintptr_t>(init));stub(0x10b5160,reinterpret_cast<uintptr_t>(param));stub(0xb6a040,reinterpret_cast<uintptr_t>(hit));
     stub(0xa4a050,reinterpret_cast<uintptr_t>(find));stub(0xbd64e0,reinterpret_cast<uintptr_t>(hp));
+    stub(0xbd6710,reinterpret_cast<uintptr_t>(posture));
     std::vector<uint8_t> root(0x100),list(0x20),hero(0x2100),target(0x2100),heroModules(0xa0),targetModules(0xa0);
     std::vector<uint8_t> heroPhysics(0x100),targetPhysics(0x100),heroData(0x280),npcData(0x280),heroDamage(0x10),targetDamage(0x10),row(0x240),manager(0x100);
     auto ptr=[](auto &v){return reinterpret_cast<uintptr_t>(v.data());};
@@ -117,6 +129,33 @@ int main(){int checks{};auto check=[&](bool ok,const char *message){++checks;if(
     check(hitCalls==2,"a fresh ranged hit between 32 and 64 metres reaches the native backend");
     check(lastPoint.x==40 && lastPoint.y==3 && lastDirection.x==1,"projectile impact and direction survive native packet construction");
     adapter.gameTick(ptr(manager),.016f);check(hitCalls==2,"ranged hit is dispatched once");
+    check(adapter.enableAutoBossPhases(true),"explicit automatic stages accept validated node store");
+    store(targetData,0x25c,int32_t(2));store(targetData,0x130,int32_t(10));store(targetData,0x228,uint8_t(4));
+    Sleep(80);adapter.tick(9,true);memory.combatState.read(state);
+    report.command=7;report.tick=GetTickCount64();report.commands[6]={7,state.actors[0].id,40,0,state.actors[0].stage};
+    memory.combatReport.write(report);adapter.tick(9,true);adapter.gameTick(ptr(manager),.016f);
+    check(field<int32_t>(targetData,0x25c)==1 && field<int32_t>(targetData,0x130)==1000 &&
+        field<int32_t>(targetData,0x148)==200,"melee HP depletion removes exactly one node and refills remaining phase");
+    check(field<uint8_t>(targetData,0x228)==4 && adapter.phaseConfirmed==1 && adapter.phaseFallbacks==1,
+        "explicit stage fallback preserves native flags and reports a confirmed decrement");
+    adapter.gameTick(ptr(manager),.016f);check(adapter.phaseConfirmed==1,"acknowledged phase command cannot remove a second node");
+    report.command=8;report.commands[7]={8,state.actors[0].id,40,1,report.commands[6].stage};
+    memory.combatReport.write(report);adapter.tick(9,true);adapter.gameTick(ptr(manager),.016f);
+    check(field<int32_t>(targetData,0x130)==1000 && field<int32_t>(targetData,0x25c)==1,
+        "queued arrow from old stage cannot injure the refilled stage");
+    Sleep(800);store(targetData,0x130,int32_t(10));adapter.tick(9,true);memory.combatState.read(state);
+    report.command=9;report.tick=GetTickCount64();report.commands[8]={9,state.actors[0].id,40,1,state.actors[0].stage};
+    memory.combatReport.write(report);adapter.tick(9,true);adapter.gameTick(ptr(manager),.016f);
+    check(field<int32_t>(targetData,0x25c)==0 && field<int32_t>(targetData,0x130)==0 && adapter.phaseConfirmed==2,
+        "ranged HP depletion completes final node without a manual deathblow");
+    bytes(0xb6e7c5,{0x41,0x83,0x7e,0x28,0x05,0x75,0x4a});
+    bytes(0x9f0410,{0x48,0x8b,0xc4,0x57,0x48,0x81,0xec,0xa0,0,0,0});
+    Sleep(800);store(targetData,0x25c,int32_t(2));store(targetData,0x130,int32_t(10));
+    adapter.tick(9,true);memory.combatState.read(state);
+    report.command=10;report.tick=GetTickCount64();report.commands[9]={10,state.actors[0].id,40,4,state.actors[0].stage};
+    memory.combatReport.write(report);adapter.tick(9,true);adapter.gameTick(ptr(manager),.016f);
+    check(phaseCalls==1 && field<int32_t>(targetData,0x25c)==1 && adapter.phaseFallbacks==2 && adapter.phaseConfirmed==3,
+        "mob damage prefers native phase packet and never double decrements after engine confirmation");
     std::cout<<checks<<" native hit ownership, game context, deduplication and register checks passed\n";
     VirtualFree(image,0,MEM_RELEASE);
 }

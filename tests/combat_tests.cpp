@@ -100,11 +100,16 @@ int main(){int n{};auto check=[&](bool b,const char*s){++n;if(!b)throw std::runt
     check(state.actors[0].bossNode==2 && state.actors[0].maxPosture==0,
         "Boss node protection does not depend on posture availability");
     auto previousLife=state.hero;
+    auto published=[&](auto expected){
+        for(unsigned attempt=0;attempt<100;++attempt){combat.tick(8,true);
+            if(memory.combatState.read(state) && expected(state))return true;Sleep(10);}
+        return false;
+    };
     put(data,0x130,int(0));p.tick=GetTickCount64();p.damage=1;
-    memory.combatReport.write(p);Sleep(60);combat.tick(8,true);memory.combatState.read(state);
-    check(state.hp==0 && state.hero==previousLife,"death still publishes a valid native life for the GUI");
-    put(data,0x130,int(500));Sleep(60);combat.tick(8,true);memory.combatState.read(state);
-    check(state.hero!=previousLife && state.hp==500 && state.ackSession==0,
+    memory.combatReport.write(p);
+    check(published([&](const auto &s){return s.hp==0 && s.hero==previousLife;}),"death still publishes a valid native life for the GUI");
+    put(data,0x130,int(500));
+    check(published([&](const auto &s){return s.hero!=previousLife && s.hp==500 && s.ackSession==0;}),
         "same-address resurrection rejects the pre-death health report");
     auto revivedLife=state.hero;
     Sleep(60);combat.tick(8,true);memory.combatState.read(state);

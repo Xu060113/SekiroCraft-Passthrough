@@ -22,6 +22,8 @@ class NativeCombatAdapter {
     NativeHitBackend nativeHit_;
     std::atomic<bool> nativeHits_{};
     std::atomic<bool> phaseFinishes_{};
+    std::atomic<bool> autoBossPhases_{};
+    bool nodeReady_{};
     std::atomic<bool> paused_{};
     uint64_t controlAt_{};bool combatActive_{};
     uintptr_t ownedHero_{},ownedData_{};uint32_t ownedHandle_{};uint8_t oldNoDamage_{};bool owned_{};
@@ -67,6 +69,52 @@ class NativeCombatAdapter {
         if((a.lastNode>=0 && a.lastNode!=v.bossNode) || (a.lastHp==0 && v.hp>0))++a.stage;
         a.lastNode=v.bossNode;a.lastHp=v.hp;
     }
+    bool finishDepletedStage(Actor &a,const Vital &player,const DamageCommand &cmd){
+        Vital before;
+        if(!autoBossPhases_ || !nodeReady_ || !resolves(a.chr,a.handle) || !read(a.chr,before) ||
+           before.data!=a.data || before.handle!=a.handle || before.hp>1 || before.bossNode<=0 ||
+           (before.bits&8) || a.stage!=cmd.stage || a.attemptedStage==a.stage)return false;
+        a.attemptedStage=a.stage;
+        // Prefer the engine's type-5 hit, which also runs its hit/SFX path.
+        bool dispatched=nativeHit_.phaseReady() && nativeHit_.dispatch(player.chr,before.chr,
+            player.position,before.position,before.maxHp,before.maxPosture,cmd,true);
+        if(dispatched)phaseDispatched.fetch_add(1);
+        Vital after;
+        if(!resolves(a.chr,a.handle) || !read(a.chr,after) || after.data!=before.data ||
+           after.handle!=before.handle)return false;
+        if(after.bossNode==before.bossNode && after.hp<=1 && !(after.bits&8)){
+            // Explicit simplified HP-stage mode. This is the same counter store
+            // fingerprinted at B6E800, never an unvalidated script/event pointer.
+            int remaining=before.bossNode-1;SIZE_T wrote{};BridgeVitalWrite write;
+            if(!WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(after.data+0x25c),
+                &remaining,sizeof(remaining),&wrote) || wrote!=sizeof(remaining))return false;
+            phaseFallbacks.fetch_add(1);
+            if(!read(a.chr,after))return false;
+        }
+        if(after.bossNode!=before.bossNode-1){phaseRejected.fetch_add(1);return false;}
+        // One phase per command. Refill only a depleted remaining phase; an
+        // engine/script refill is retained. A final depleted NoDeath actor needs
+        // an explicit zero because the vanilla HP setter floors it at one.
+        if(after.hp<=1){
+            if(after.bossNode>0){
+                if(!setHp(after,after.maxHp))return false;
+                if(after.maxPosture>0){BridgeVitalWrite write;
+                    reinterpret_cast<SetPosture>(base_+0xbd6710)(after.data,after.maxPosture,1);}
+            }else{
+                if(!setHp(after,0))return false;
+                Vital final;
+                if(!read(a.chr,final) || final.data!=a.data || final.handle!=a.handle || final.bossNode!=0)return false;
+                if(final.hp==1){int zero{};SIZE_T wrote{};BridgeVitalWrite write;
+                    if(!WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(final.data+0x130),
+                        &zero,sizeof(zero),&wrote) || wrote!=sizeof(zero))return false;}
+            }
+        }
+        Vital done;if(!read(a.chr,done) || done.data!=a.data || done.handle!=a.handle)return false;
+        refreshStage(a,done);phaseConfirmed.fetch_add(1);
+        sc::log("Auto Boss phase: nodes="+std::to_string(before.bossNode)+"->"+
+            std::to_string(done.bossNode)+" hp="+std::to_string(done.hp));
+        return true;
+    }
     void commands(const Vital &player,bool native){
         auto first=report_.command>damageSlots?report_.command-damageSlots:0;
         ackCommand_=std::max(ackCommand_,first);
@@ -79,6 +127,7 @@ class NativeCombatAdapter {
                     if(cmd.stage!=a.stage){ackCommand_=seq;break;}
                     if(native){
                         success=v.hp==0 || nativeHit_.dispatch(player.chr,v.chr,player.position,v.position,v.maxHp,v.maxPosture,cmd);
+                        if(success && autoBossPhases_)finishDepletedStage(a,player,cmd);
                         Vital after;
                         bool remote=cmd.kind==1 || cmd.kind==2 || cmd.kind==3 || cmd.kind==5;
                         if(success && remote && phaseFinishes_ && read(a.chr,after) && resolves(a.chr,a.handle) &&
@@ -137,12 +186,14 @@ class NativeCombatAdapter {
     std::atomic<uint64_t> observed{},applied{},rejected{},publishedActors{};
     std::atomic<uint64_t> appliedPosture{};
     std::atomic<uint64_t> phaseDispatched{},phaseConfirmed{},phaseRejected{};
+    std::atomic<uint64_t> phaseFallbacks{};
     std::atomic<uint64_t> nativeDispatched{},gameThreadCalls{};
     void initialize(uintptr_t base,SharedMemory &memory){base_=base;memory_=&memory;
         ready_=base && code(0xbd64e0,std::array<uint8_t,16>{0x48,0x89,0x5c,0x24,0x18,0x89,0x54,0x24,0x10,0x57,0x48,0x83,0xec,0x20,0x8b,0xb9}) &&
             code(0xa4a050,std::array<uint8_t,16>{0x48,0x83,0xec,0x28,0xe8,0x37,0xff,0xff,0xff,0x48,0x85,0xc0,0x74,0x08,0x48,0x8b});
         postureReady_=ready_ && code(0xbd6710,std::array<uint8_t,16>{0x48,0x89,0x6c,0x24,0x18,0x48,0x89,0x74,0x24,0x20,0x57,0x48,0x83,0xec,0x20,0x41}) &&
             code(0xbd679a,std::array<uint8_t,8>{0x89,0x87,0x48,0x01,0x00,0x00,0x85,0xdb});
+        nodeReady_=postureReady_ && code(0xb6e800,std::array<uint8_t,6>{0x89,0x91,0x5c,0x02,0x00,0x00});
         sc::log("Native HP / posture signatures="+std::to_string(ready_)+"/"+std::to_string(postureReady_));}
     bool ready()const{return ready_;}
     bool postureReady()const{return postureReady_;}
@@ -150,6 +201,7 @@ class NativeCombatAdapter {
     void enableNativeHits(bool on){nativeHits_.store(on,std::memory_order_release);}
     bool nativeHits()const{return nativeHits_.load(std::memory_order_acquire);}
     bool enablePhaseFinishes(bool on){phaseFinishes_=on && nativeHit_.phaseReady();return phaseFinishes_;}
+    bool enableAutoBossPhases(bool on){autoBossPhases_=on && nodeReady_;return autoBossPhases_;}
     void pause(bool on){paused_=on;}
     uint32_t nativeHitFailure()const{return nativeHit_.lastFailure();}
     void gameTick(uintptr_t manager,float dt)noexcept {

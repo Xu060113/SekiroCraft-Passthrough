@@ -133,3 +133,14 @@ $f=GuiFixture 'invalid-grapple';$before=(Get-FileHash "$($f.game)\sekirobridge.i
 $failed=$false;try{& "$($f.dir)\scripts\update-installed.ps1" -MinecraftDirectory $f.mc -Diagnostic -NativeGrappleKey 'MM'|Out-Null}catch{$failed=$true}
 Check ($failed -and (Get-FileHash "$($f.game)\sekirobridge.ini").Hash -eq $before) 'invalid native binding fails before touching installed files'
 Write-Output "$checks total paired-update, diagnostic, mapped grapple and rollback checks passed."
+$f=GuiFixture 'auto-boss'
+$manifest=Get-Content "$($f.dir)\build\verification.json" -Raw|ConvertFrom-Json
+$manifest|Add-Member -NotePropertyName experimental -NotePropertyValue @('HP-depleted Boss stage mode')
+$manifest|ConvertTo-Json -Depth 6|Set-Content "$($f.dir)\build\verification.json"
+& "$($f.dir)\scripts\update-installed.ps1" -MinecraftDirectory $f.mc -AutoBossPhases -NativeGrappleKey M|Out-Null
+$ini=Get-Content "$($f.game)\sekirobridge.ini" -Raw
+Check ($ini -match 'auto_boss_phases=1' -and $ini -match 'native_hits=1' -and $ini -match 'native_phase_finish=0') 'explicit HP-stage option enables supported combat backend without legacy remote profile'
+$f=GuiFixture 'unsupported-auto-boss';$before=(Get-FileHash "$($f.game)\sekirobridge.ini").Hash
+$failed=$false;try{& "$($f.dir)\scripts\update-installed.ps1" -MinecraftDirectory $f.mc -AutoBossPhases|Out-Null}catch{$failed=$true}
+Check ($failed -and (Get-FileHash "$($f.game)\sekirobridge.ini").Hash -eq $before) 'unsupported auto-stage package fails before mutations'
+Write-Output "$checks total paired-update and explicit HP-stage checks passed."
