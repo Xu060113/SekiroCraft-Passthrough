@@ -2,6 +2,12 @@ param([string]$MinecraftDirectory='E:\.minecraft\versions\1.20.1-Fabric 0.16.10'
       [string]$NativeGrappleKey='')
 $ErrorActionPreference='Stop'
 if($NativeGrappleKey -and $NativeGrappleKey -notmatch '^[A-Za-z]$'){throw 'NativeGrappleKey must be a single letter matching the Sekiro binding.'}
+function Get-OwnedRelativePath([string]$Root,[string]$Path){
+    $prefix=[IO.Path]::GetFullPath($Root).TrimEnd('\')+'\'
+    $full=[IO.Path]::GetFullPath($Path)
+    if(!$full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)){throw 'File lies outside its declared root.'}
+    return $full.Substring($prefix.Length)
+}
 $projectRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $recordPath=Join-Path $projectRoot 'runtime\installation.json'
 $record=Get-Content -LiteralPath $recordPath -Raw | ConvertFrom-Json
@@ -28,7 +34,7 @@ foreach($file in $record.files){
     if((Get-FileHash -LiteralPath (Join-Path $gameRoot $file.name)).Hash -ne $file.sha256){throw "Installed file changed: $($file.name)"}
 }
 foreach($source in @($dllSource,$jarSource)){
-    $relative=[IO.Path]::GetRelativePath($packageRoot,$source)
+    $relative=Get-OwnedRelativePath $packageRoot $source
     $expected=@($manifest.files | Where-Object name -EQ $relative)
     if($expected.Count -ne 1 -or (Get-FileHash -LiteralPath $source).Hash -ne $expected[0].sha256){throw "Verified package checksum mismatch: $relative"}
 }
@@ -50,7 +56,7 @@ if(($guiPatch -or $manifest.patch -eq 'gameplay3-life-actions-projectiles') -and
     if(Test-Path -LiteralPath $saveRoot){
         $saveBackup=Join-Path $backupRoot 'saves';New-Item -ItemType Directory -Path $saveBackup|Out-Null
         Get-ChildItem -LiteralPath $saveRoot -Recurse -File -Filter '*.sl2*'|ForEach-Object {
-            $relative=[IO.Path]::GetRelativePath($saveRoot,$_.FullName);$target=Join-Path $saveBackup $relative
+            $relative=Get-OwnedRelativePath $saveRoot $_.FullName;$target=Join-Path $saveBackup $relative
             New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($target)) -Force|Out-Null
             Copy-Item -LiteralPath $_.FullName -Destination $target
         }
@@ -81,10 +87,11 @@ try {
         Set-Content -LiteralPath $configTarget -Value $ini -Encoding UTF8
     }
     if($guiPatch){
-        $properties=if($hadProperties){Get-Content -LiteralPath $propertiesTarget -Raw -Encoding Latin1}else{"channel=default`r`n"}
+        $propertyEncoding=[Text.Encoding]::GetEncoding(28591)
+        $properties=if($hadProperties){[IO.File]::ReadAllText($propertiesTarget,$propertyEncoding)}else{"channel=default`r`n"}
         $properties=[regex]::Replace($properties,'(?im)^\s*gui_trace\s*=.*(?:\r?\n|$)','')
         New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($propertiesTarget)) -Force|Out-Null
-        Set-Content -LiteralPath $propertiesTarget -Value ($properties.TrimEnd()+"`r`ngui_trace="+$Diagnostic.ToString().ToLowerInvariant()) -Encoding Latin1
+        [IO.File]::WriteAllText($propertiesTarget,($properties.TrimEnd()+"`r`ngui_trace="+$Diagnostic.ToString().ToLowerInvariant()+"`r`n"),$propertyEncoding)
         if($Diagnostic -and $hadTraceStop){Remove-Item -LiteralPath $traceStop}
     }
     Copy-Item -LiteralPath $dllSource -Destination $dllTemp
