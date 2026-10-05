@@ -1,4 +1,22 @@
-# Shared-memory protocol v1
+# Shared-memory protocol v2
+
+The current GUI/native-combat patch changes the ABI. Update host DLL and MC JAR/JNI together; JNI exposes `abiVersion()` and the mapping header rejects older participants. Descriptions below of v1 side channels are historical; this table and the v2 sections override their sizes and offsets.
+
+| Current structure/channel | Bytes | Changes from v1 |
+| --- | ---: | --- |
+| FrameMeta | 112 | GUI generation uint64 at 96; captured scaled GUI width/height uint32 at 104/108 |
+| Main mapping | 74650184 | Header 248, three slots of FrameMeta plus 1920×1080×12 capacity |
+| input-v3 | 6208 | Header 64, 128 events of 48 bytes |
+| combat-state-v3 | 3672 | Header 88, 64 actors of 56 bytes |
+| combat-report-v2 | 4160 | Header 64, 64 commands of 64 bytes |
+
+Current Control flags additionally include native dead=32, native action=64 and native UI=128. Native UI stops MC input/compositing and pauses its integrated server; HP identity and creative protection remain synchronized. F6 explicitly switches ownership, and Esc enters native ownership when no MC screen is open. Scripted native UI has no complete automatic detector.
+
+Input header: tick/epoch/sequence at 0/8/16, cumulative relative mouse counts at 24/32, normalized displayed-GUI pointer floats at 40/44, GUI generation at 48, pointer timestamp at 56. Event fields at 0…28 retain their old meanings, followed by event timestamp at 32 and displayed GUI generation at 40. GUI events must match the current Screen instance and scaled geometry and be fresh; stale-screen presses are discarded. Coordinates use the rectangle of the overlay actually drawn, transform HWND client pixels to physical backbuffer pixels and retain out-of-bounds values. Pointer snapshots share the event packet, rather than racing a separate Control snapshot. Screen changes silently cancel mouse drag ownership instead of releasing an old click into a new screen.
+
+Actor records add opaque stage uint64 at 48. A stage advances on a native node change or HP recovery from zero. Damage commands contain sequence/actor at 0/8, amount float at 16, kind uint32 at 20 (melee 0, arrow 1, trident 2, explosion 3, mob 4, magic 5), stage at 24, impact xyz at 32, direction xyz at 44, flags/reserved at 56/60. Flag 1 indicates actual source geometry. Native handles are revalidated and stale-stage commands acknowledged without execution; pointers never cross IPC. Actual geometry is preserved, while ordinary native damage still uses a sword profile. Candidate phase-finishing calls remain disabled by default and require live stage/script/reward acceptance.
+
+## Historical v1 transport details
 
 All integers and IEEE-754 floats use little endian. C++ layouts are statically asserted; Java uses explicit byte offsets and is checked against C++ binary fixtures. Win32 `GetTickCount64()` is the only time base, exposed through JNI to avoid mixing Java nanoTime with the host clock.
 
@@ -8,7 +26,7 @@ Names: `Local\SekiroBridge-<channel>` and its `-lock` mutex. Channel names conta
 | --- | ---: | --- |
 | Header | 248 bytes | magic `SBP1`, version, mapping size, Control, newest frame, peer status/time/epoch |
 | Control | 200 bytes | sequence/time/epoch, flags/capabilities, player/eye/forward, camera lens, mapping offset/scale, output dimensions, VK bitmap, pointer/buttons/wheel, command and UTF32 stream |
-| FrameMeta | 96 bytes | sequence/time/epoch, source control sequence, dimensions/flags, capture camera/lens and source control timestamp |
+| FrameMeta (v1) | 96 bytes | sequence/time/epoch, source control sequence, dimensions/flags, capture camera/lens and source control timestamp |
 | Frame payload | width × height × 12 | RGBA8 world, float32 OpenGL depth [0,1], RGBA8 premultiplied overlay |
 
 The mapping contains one Header and three fixed-capacity frame slots. Maximum dimensions are 1920×1080; capacity is 74,650,136 bytes. Default capture width is 1280, with height following the host camera aspect. The mapping owns the publication sequence, so restarting the MC producer does not reuse old frame numbers. A new host process supplies a new epoch; frames from an earlier epoch cannot be drawn.

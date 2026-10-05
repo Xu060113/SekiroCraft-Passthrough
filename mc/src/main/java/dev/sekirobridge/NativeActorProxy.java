@@ -5,7 +5,7 @@ import net.minecraft.entity.mob.PathAwareEntity;
 import net.minecraft.world.World;
 /** Ephemeral invisible hit target; native physics alone supplies its position. */
 public final class NativeActorProxy extends PathAwareEntity implements NativeTerrainExcluded {
-    long nativeId;int nativeFlags;long epoch;
+    long nativeId;int nativeFlags;long epoch,stage;
     public NativeActorProxy(EntityType<? extends PathAwareEntity> type,World world){super(type,world);
         setAiDisabled(true);setNoGravity(true);noClip=true;setPersistent();setSilent(true);}
     public boolean hostile(){return (nativeFlags&1)!=0 && isAlive() && CombatBridge.serverActive();}
@@ -15,7 +15,7 @@ public final class NativeActorProxy extends PathAwareEntity implements NativeTer
         return super.damage(source,amount);
     }
     @Override protected void applyDamage(DamageSource source,float amount){
-        if(!getWorld().isClient && amount>0)CombatBridge.hit(nativeId,epoch,amount);
+        if(!getWorld().isClient && amount>0)CombatBridge.hit(this,source,amount);
         // Health is acknowledged by Sekiro; never run MC death/loot from predicted damage.
     }
     @Override public boolean isPushable(){return false;}

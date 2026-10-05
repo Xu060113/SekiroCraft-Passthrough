@@ -29,10 +29,13 @@ struct InputEvent {
     float x{}, y{};
     int32_t amount{};
     uint32_t reserved{};
+    uint64_t tick{}, guiGeneration{};
 };
 struct alignas(8) InputPacket {
     uint64_t tick{}, epoch{}, sequence{};
     int64_t dx{}, dy{}; // cumulative DirectInput mouse counts, not cursor position
+    float mouseX{},mouseY{};
+    uint64_t guiGeneration{},pointerTick{};
     std::array<InputEvent, inputSlots> events{};
 };
 struct alignas(8) PlayerPacket {
@@ -43,7 +46,20 @@ struct alignas(8) PlayerPacket {
     float fov{}, aspect{}, nearZ{}, farZ{};
     sc::Vec3 velocity{};
 };
-static_assert(sizeof(InputPacket) == 4136 && sizeof(PlayerPacket) == 104);
+static_assert(sizeof(InputEvent)==48 && sizeof(InputPacket) == 6208 && sizeof(PlayerPacket) == 104);
+struct GuiDisplay {
+    uint64_t generation{},tick{};
+    float x{},y{},width{},height{},surfaceWidth{},surfaceHeight{};
+    static GuiDisplay fit(const FrameMeta &m,float width,float height,uint64_t now) {
+        if(width<=0 || height<=0 || !std::isfinite(m.aspect) || m.aspect<=0)return {};
+        auto w=std::min(width,height*m.aspect),h=w/m.aspect;
+        return {m.guiGeneration,now,(width-w)/2,(height-h)/2,w,h,width,height};
+    }
+    std::array<float,2> point(float px,float py,float clientWidth,float clientHeight)const {
+        if(!generation || width<=0 || height<=0 || clientWidth<=0 || clientHeight<=0)return {-1,-1};
+        return {(px*surfaceWidth/clientWidth-x)/width,(py*surfaceHeight/clientHeight-y)/height};
+    }
+};
 struct alignas(8) TerrainPacket {
     uint64_t sequence{}, tick{}, epoch{};
     sc::Vec3 center{};
@@ -87,7 +103,7 @@ inline sc::Mat4 frameCameraPose(const FrameMeta &m) {
     return playerCameraPose(camera);
 }
 inline bool validInput(const InputPacket &p) {
-    if (!p.tick || !p.epoch) return false;
+    if (!p.tick || !p.epoch || !std::isfinite(p.mouseX) || !std::isfinite(p.mouseY)) return false;
     auto first=p.sequence>inputSlots?p.sequence-inputSlots:0;
     for (auto i=first;i<p.sequence;++i) {
         const auto &e=p.events[i%inputSlots];

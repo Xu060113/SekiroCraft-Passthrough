@@ -20,23 +20,23 @@ public final class JniPeer {
         }
         if (state == null || state.command() != 77 || state.text()[0] != 0x4e2d)
             throw new AssertionError("C++ control not received");
-        var input=Protocol.direct(4136);var terrain=Protocol.direct(448);
+        var input=Protocol.direct(Protocol.INPUT_BYTES);var terrain=Protocol.direct(448);
         while(System.currentTimeMillis()<deadline && (!NativeBridge.input(handle,input) || !NativeBridge.terrain(handle,terrain)))Thread.sleep(5);
         if(input.getLong(16)!=2 || input.getLong(24)!=17 || input.getLong(32)!=-9 ||
-           input.getInt(40)!=2 || input.getInt(48)!=1 || input.getInt(80)!=0 ||
-           input.getFloat(56)!=.25f || input.getFloat(88)!=.26f || input.getInt(52)!=1)
+           input.getInt(64)!=2 || input.getInt(72)!=1 || input.getInt(120)!=0 ||
+           input.getFloat(80)!=.25f || input.getFloat(128)!=.26f || input.getInt(76)!=1)
             throw new AssertionError("quick down/up, individual coordinates and Shift modifier survive one poll");
         if(terrain.get(404)!=1 || terrain.getFloat(200)!=3.5f || terrain.getFloat(24)!=12)
             throw new AssertionError("native terrain grid ABI");
-        var combat=Protocol.direct(3160);
+        var combat=Protocol.direct(3672);
         while(System.currentTimeMillis()<deadline && !NativeBridge.combatState(handle,combat))Thread.sleep(5);
         if(combat.getLong(24)!=101 || combat.getInt(40)!=250 || combat.getLong(88)!=102 || combat.getFloat(96)!=12 || combat.getInt(116)!=6)
             throw new AssertionError("native actor / life ABI");
         if(NativeBridge.combatState(handle,Protocol.direct(3159)))throw new AssertionError("short combat destination accepted");
-        var report=Protocol.direct(1600);
+        var report=Protocol.direct(4160);
         report.putLong(0,NativeBridge.clockMs()).putLong(8,state.epoch()).putLong(16,101).putLong(24,103)
             .putDouble(32,.1).putDouble(40,.05).putLong(48,1).putInt(56,1)
-            .putLong(64,1).putLong(72,102).putFloat(80,7);
+            .putLong(64,1).putLong(72,102).putFloat(80,7).putLong(88,1);
         if(!NativeBridge.combatReport(handle,report))throw new AssertionError("combat injury report");
         report.putFloat(80,Float.NaN);
         if(NativeBridge.combatReport(handle,report))throw new AssertionError("invalid injury accepted");

@@ -22,7 +22,7 @@ class NativeMovement {
     std::mutex mutex_;
     PhysicsChannel *channel_{};
     Control control_{};
-    bool active_{};
+    bool active_{},combatActive_{};
     NativeDriver *driver_{};
     NativeCombatAdapter *combat_{};
     PhysicsPacket packet_{};
@@ -63,9 +63,9 @@ class NativeMovement {
         sc::log(installed_ ? "Player movement constraint hook installed; flight timer signature=" +
                             std::to_string(canFly_) : "Player movement hook installation failed");
     }
-    void update(const Control &control, bool on) {
+    void update(const Control &control, bool on,bool combatOn=false) {
         std::unique_lock lock(mutex_, std::try_to_lock); if (!lock) return;
-        control_ = control; active_ = on && installed_;
+        control_ = control; active_ = on && installed_;combatActive_=on || combatOn;
         if (!active_) { releaseFlight(); lastPhysics_ = 0; }
     }
     void sample(uintptr_t physics, float *candidate) noexcept {
@@ -97,11 +97,11 @@ class NativeMovement {
             return;
         }
         playerCalls.fetch_add(1, std::memory_order_relaxed);
-        if(combat_)combat_->tick(control_.epoch,active_ && fresh(now,control_.tickMs));
+        if(combat_)combat_->tick(control_.epoch,combatActive_ && fresh(now,control_.tickMs));
         if (!active_ || !fresh(now, control_.tickMs)) { releaseFlight(); lastPhysics_ = 0; return; }
         if (driver_ && (control_.capabilities & mcOwnerCapability)) {
-            sc::Vec3 target{};
-            bool have=driver_->target(target);
+            sc::Vec3 target{};float angle{};
+            bool have=driver_->target(target,&angle);
             if(control_.flags & (NativeDead|NativeAction)){releaseFlight();lastPhysics_=0;return;}
             if (!have || !canFly_ ||
                 !gravity_.acquire(physics+0x92d,1) || !noMove_.acquire(hero+0x1f40,128)) {
@@ -109,6 +109,9 @@ class NativeMovement {
             }
             candidate[0]=target.x;candidate[1]=target.y;candidate[2]=target.z;
             float zero{};SIZE_T wrote{};
+            // Native actions read the body's facing, not the imported MC camera.
+            // Keep it aligned while MC owns position, before a native handoff.
+            WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(physics+0x74),&angle,sizeof(angle),&wrote);
             WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(physics+0x8d0),&zero,sizeof(zero),&wrote);
             return;
         }

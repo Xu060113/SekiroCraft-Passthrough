@@ -21,7 +21,7 @@ int wmain(int argc, wchar_t **argv) {
     bridge::TerrainPacket terrain;terrain.sequence=1;terrain.epoch=c.epoch;
     terrain.center={12,4,8};terrain.hits[40]=1;terrain.heights[40]=3.5f;
     bridge::CombatState combat;combat.sequence=1;combat.epoch=c.epoch;combat.hero=101;combat.hp=250;combat.maxHp=500;combat.flags=1;
-    combat.count=1;combat.actors[0]={102,{12,4,8},200,400,6,1,0};
+    combat.count=1;combat.actors[0]={102,{12,4,8},200,400,6,1,0,0,0,1};
     auto deadline = GetTickCount64() + 7000;
     bool projectileVerified=false,actionVerified=false;
     while (GetTickCount64() < deadline) {

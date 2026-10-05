@@ -9,7 +9,8 @@ namespace bridge {
 // Compatibility HP/posture writes use the verified physics callback. Opt-in
 // native hits drain only in the separately fingerprinted AttackManager update.
 class NativeCombatAdapter {
-    struct Actor {uintptr_t chr{},data{},physics{};uint32_t handle{};uint64_t id{},seen{};};
+    struct Actor {uintptr_t chr{},data{},physics{};uint32_t handle{};uint64_t id{},seen{};
+        uint64_t stage{1},attemptedStage{};int32_t lastNode{-1},lastHp{-1};};
     struct Vital {uintptr_t chr{},data{};uint32_t handle{};int32_t hp{},maxHp{},posture{},maxPosture{},bossNode{};uint8_t bits{};sc::Vec3 position{};uint8_t team{};};
     uintptr_t base_{};SharedMemory *memory_{};bool ready_{},postureReady_{};
     std::mutex mutex_; std::array<Actor,actorSlots> actors_{};
@@ -20,6 +21,8 @@ class NativeCombatAdapter {
     CombatReport report_{};
     NativeHitBackend nativeHit_;
     std::atomic<bool> nativeHits_{};
+    std::atomic<bool> phaseFinishes_{};
+    std::atomic<bool> paused_{};
     uint64_t controlAt_{};bool combatActive_{};
     uintptr_t ownedHero_{},ownedData_{};uint32_t ownedHandle_{};uint8_t oldNoDamage_{};bool owned_{};
     using Lookup=uintptr_t(*)(uintptr_t,uint32_t);
@@ -60,6 +63,10 @@ class NativeCombatAdapter {
            current.handle!=v.handle || current.hp!=v.hp || current.maxHp!=v.maxHp)return false;
         BridgeVitalWrite write;
         reinterpret_cast<SetHp>(base_+0xbd64e0)(v.data,std::clamp(hp,0,v.maxHp));return true;}
+    static void refreshStage(Actor &a,const Vital &v){
+        if((a.lastNode>=0 && a.lastNode!=v.bossNode) || (a.lastHp==0 && v.hp>0))++a.stage;
+        a.lastNode=v.bossNode;a.lastHp=v.hp;
+    }
     void commands(const Vital &player,bool native){
         auto first=report_.command>damageSlots?report_.command-damageSlots:0;
         ackCommand_=std::max(ackCommand_,first);
@@ -67,8 +74,29 @@ class NativeCombatAdapter {
             bool success=false;
             for(auto &a:actors_)if(a.id==cmd.actor && a.chr && resolves(a.chr,a.handle)){
                 Vital v;if(read(a.chr,v) && v.data==a.data && v.handle==a.handle &&
-                   sc::length(v.position-player.position)<64 && v.hp>0 && !(v.bits&8)){
-                    if(native)success=nativeHit_.dispatch(player.chr,v.chr,player.position,v.position,v.maxHp,v.maxPosture,cmd.amount);
+                   sc::length(v.position-player.position)<64 && (v.hp>0 || (native && v.bossNode>0)) && !(v.bits&8)){
+                    refreshStage(a,v);
+                    if(cmd.stage!=a.stage){ackCommand_=seq;break;}
+                    if(native){
+                        success=v.hp==0 || nativeHit_.dispatch(player.chr,v.chr,player.position,v.position,v.maxHp,v.maxPosture,cmd);
+                        Vital after;
+                        bool remote=cmd.kind==1 || cmd.kind==2 || cmd.kind==3 || cmd.kind==5;
+                        if(success && remote && phaseFinishes_ && read(a.chr,after) && resolves(a.chr,a.handle) &&
+                           after.handle==a.handle && after.data==a.data){
+                            refreshStage(a,after);
+                            bool depleted=after.hp<=1 || (after.maxPosture>0 && after.posture==0 && !(after.bits&16));
+                            if(a.stage==cmd.stage && a.attemptedStage!=a.stage && after.bossNode>0 &&
+                               depleted && !(after.bits&12)){
+                                a.attemptedStage=a.stage;
+                                if(nativeHit_.dispatch(player.chr,after.chr,player.position,after.position,after.maxHp,after.maxPosture,cmd,true)){
+                                    phaseDispatched.fetch_add(1);Vital done;
+                                    if(read(a.chr,done) && done.data==a.data && done.handle==a.handle && done.bossNode==after.bossNode-1){
+                                        phaseConfirmed.fetch_add(1);refreshStage(a,done);
+                                    }else phaseRejected.fetch_add(1);
+                                }else phaseRejected.fetch_add(1);
+                            }
+                        }
+                    }
                     else {
                         auto target=damageHp(v.hp,v.maxHp,cmd.amount/20.,0);
                         // A Boss can retain native nodes without NoDeath bit 4.
@@ -108,6 +136,7 @@ class NativeCombatAdapter {
   public:
     std::atomic<uint64_t> observed{},applied{},rejected{},publishedActors{};
     std::atomic<uint64_t> appliedPosture{};
+    std::atomic<uint64_t> phaseDispatched{},phaseConfirmed{},phaseRejected{};
     std::atomic<uint64_t> nativeDispatched{},gameThreadCalls{};
     void initialize(uintptr_t base,SharedMemory &memory){base_=base;memory_=&memory;
         ready_=base && code(0xbd64e0,std::array<uint8_t,16>{0x48,0x89,0x5c,0x24,0x18,0x89,0x54,0x24,0x10,0x57,0x48,0x83,0xec,0x20,0x8b,0xb9}) &&
@@ -120,9 +149,11 @@ class NativeCombatAdapter {
     bool prepareNativeHits(){return ready_ && nativeHit_.initialize(base_);}
     void enableNativeHits(bool on){nativeHits_.store(on,std::memory_order_release);}
     bool nativeHits()const{return nativeHits_.load(std::memory_order_acquire);}
+    bool enablePhaseFinishes(bool on){phaseFinishes_=on && nativeHit_.phaseReady();return phaseFinishes_;}
+    void pause(bool on){paused_=on;}
     uint32_t nativeHitFailure()const{return nativeHit_.lastFailure();}
     void gameTick(uintptr_t manager,float dt)noexcept {
-        if(!nativeHits() || !std::isfinite(dt) || dt<=0 || dt>.25f)return;
+        if(paused_ || !nativeHits() || !std::isfinite(dt) || dt<=0 || dt>.25f)return;
         uintptr_t actual{};if(!sc::readMemory(base_+0x3d77ef0,actual) || actual!=manager || !actual)return;
         gameThreadCalls.fetch_add(1);
         std::unique_lock lock(mutex_,std::try_to_lock);if(!lock)return;
@@ -172,7 +203,7 @@ class NativeCombatAdapter {
                 auto target=damageHp(player.hp,player.maxHp,report_.invulnerable?0:report_.damage-damage_,report_.heal-heal_);
                 if(target==player.hp || setHp(player,target)){damage_=report_.damage;heal_=report_.heal;read(hero_,player);}
             }
-            if(!nativeHits())commands(player,false);
+            if(!nativeHits() && !paused_)commands(player,false);
         }
         if(now-publishAt_<50)return;publishAt_=now;
         CombatState out;out.sequence=++sequence_;out.tick=now;out.epoch=epoch;out.hero=heroId_;
@@ -184,6 +215,7 @@ class NativeCombatAdapter {
             // while the current handle table still resolves the same entity.
             if(!resolves(a.chr,a.handle)){a={};continue;}
             Vital v;if(!read(a.chr,v) || v.data!=a.data || v.handle!=a.handle || sc::length(v.position-player.position)>64)continue;
+            refreshStage(a,v);
             auto &p=out.actors[out.count++];p.id=a.id;p.position=v.position;p.hp=v.hp;p.maxHp=v.maxHp;p.team=v.team;
             // EMEDF Enemy, StrongEnemy and hostile NPC teams; allies remain
             // individually attackable but never attract the added monster goal.
@@ -191,6 +223,7 @@ class NativeCombatAdapter {
                 v.team==23 || v.team==24 || v.team==27;
             p.flags=(hostile?1:0)|((v.bits&8)?2:0)|((v.bits&4)?4:0)|((v.bits&16)?8:0);
             p.posture=v.posture;p.maxPosture=v.maxPosture;p.bossNode=v.bossNode;
+            p.stage=a.stage;
         }
         publishedActors=out.count;memory_->combatState.write(out);
     }

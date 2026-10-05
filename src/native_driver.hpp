@@ -119,8 +119,8 @@ class NativeDriver {
     void takeCameraFrame(std::shared_ptr<Frame> &frame){cameraFrames_.takeDisplayed(frame);}
     void update(const Control &c,bool enabled,bool hideNative=false){std::unique_lock lock(mutex_,std::try_to_lock);
         if(lock){control_=c;enabled_=enabled && ready();
-            cameraEpoch_=c.epoch;controlTick_=c.tickMs;cameraEnabled_=enabled_;hideNative_=enabled_ && hideNative;}}
-    bool target(sc::Vec3 &position) {
+            cameraEpoch_=c.epoch;controlTick_=c.tickMs;cameraEnabled_=enabled_;hideNative_=hideNative;}}
+    bool target(sc::Vec3 &position,float *angle=nullptr) {
         std::unique_lock lock(mutex_,std::try_to_lock);if(!lock)return false;
         auto now=GetTickCount64();
         if(!enabled_ || !fresh(now,control_.tickMs))return false;
@@ -128,6 +128,10 @@ class NativeDriver {
         auto center=have?player_.position:sc::Vec3{control_.player[0],control_.player[1],control_.player[2]};
         auto epoch=control_.epoch;
         if(have)position=player_.position;
+        if(have && angle){
+            float yaw=player_.yaw*3.14159265358979323846f/180;
+            *angle=std::atan2(-std::sin(yaw),-std::cos(yaw));
+        }
         // Ray work cannot hold the state mutex and make a camera/control update
         // miss its zero-wait lock and fall back to the native wolf camera.
         lock.unlock();
@@ -142,7 +146,7 @@ class NativeDriver {
         auto now=GetTickCount64();
         // Reassert before scene rendering, after native combat/character updates
         // may have enabled Draw. Present alone is too late for that frame.
-        if(cameraEnabled_ && hideNative_ && fresh(now,controlTick_)){
+        if(hideNative_ && fresh(now,controlTick_)){
             uintptr_t root{},hero{};uint8_t bits{};
             if(sc::readMemory(base_+0x3d7a1e0,root) && sc::readMemory(root+0x88,hero) &&
                sc::readMemory(hero+0x1a11,bits) && (bits&8)){

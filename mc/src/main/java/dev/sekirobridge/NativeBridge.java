@@ -25,7 +25,9 @@ public final class NativeBridge {
         if (!Files.exists(dll) || !MessageDigest.isEqual(bytes, Files.readAllBytes(dll)))
             Files.write(dll, bytes);
         System.load(dll.toAbsolutePath().toString());
+        if(abiVersion()!=2)throw new IllegalStateException("Mismatched bridge JNI ABI; install the paired DLL and JAR.");
     }
+    public static native int abiVersion();
     public static native long open(String channel);
     public static native void close(long handle);
     public static native boolean control(long handle, ByteBuffer destination);

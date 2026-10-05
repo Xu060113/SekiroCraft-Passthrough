@@ -3,6 +3,7 @@
 #include "MinHook.h"
 #include <atomic>
 #include <thread>
+#include "../bridge/native_action.hpp"
 extern "C" {
 void scCombatHitTraceEntry();
 extern void *scCombatHitTraceContinue;
@@ -36,6 +37,7 @@ class CombatTrace {
     size_t head_{},count_{};std::atomic<uint64_t> dropped_{};
     std::atomic<bool> enabled_{};uint64_t started_{};
     std::atomic<uint64_t> hitSequence_{},activity_{};
+    NativeAnimation lastAnimation_{};uint32_t lastActionFlags_=~0u;uint64_t animationTick_{};
     static bool read(uintptr_t data,Vitals &v){
         return sc::readMemory(data+0x130,v.hp) && sc::readMemory(data+0x134,v.maxHp) &&
             sc::readMemory(data+0x148,v.posture) && sc::readMemory(data+0x14c,v.maxPosture) &&
@@ -98,12 +100,12 @@ class CombatTrace {
         for(;;){Event e;{std::lock_guard lock(mutex_);if(!count_)break;
                 e=events_[head_];head_=(head_+1)%events_.size();--count_;}
             out<<"{\"tick\":"<<e.tick<<",\"thread\":"<<e.thread<<",\"data\":\"0x"<<std::hex<<e.data
-               <<std::dec<<"\",\"kind\":\""<<(e.kind==1?"hp":e.kind==2?"posture":"native-hit-entry")<<"\",\"source\":\""
+               <<std::dec<<"\",\"kind\":\""<<(e.kind==1?"hp":e.kind==2?"posture":e.kind==4?"animation-state":"native-hit-entry")<<"\",\"source\":\""
                <<(e.bridge?"bridge":"native")<<"\",\"target\":"<<e.target<<",\"recovery\":"<<unsigned(e.recovery)
                <<",\"before\":";vital(out,e.before);out<<",\"after\":";vital(out,e.after);
             out<<",\"stackRva\":[";for(unsigned i=0;i<e.frames;++i){if(i)out<<',';
                 out<<'"'<<std::hex<<e.stack[i]<<std::dec<<'"';}out<<']';
-            if(e.kind==3){out<<",\"hitId\":"<<e.hitId<<",\"args\":[";
+            if(e.kind==3 || e.kind==4){out<<",\"hitId\":"<<e.hitId<<",\"args\":[";
                 for(unsigned i=0;i<4;++i){if(i)out<<',';out<<"\"0x"<<std::hex<<e.args[i]<<std::dec<<'"';}
                 out<<"],\"attackBytes\":";if(e.attackRead)bytes(out,e.attack);else out<<"null";
                 out<<",\"hitBytes\":";if(e.hitRead)bytes(out,e.hit);else out<<"null";}
@@ -111,6 +113,18 @@ class CombatTrace {
         }out.flush();
     }
   public:
+    // Present samples only changes; the existing bounded writer owns all file I/O.
+    void animation(NativeAnimation value,uint32_t actionFlags){
+        auto now=GetTickCount64();if(!enabled_ || now-animationTick_<16)return;
+        if(value.hero==lastAnimation_.hero && value.module==lastAnimation_.module && value.id==lastAnimation_.id &&
+           value.valid==lastAnimation_.valid && actionFlags==lastActionFlags_)return;
+        animationTick_=now;lastAnimation_=value;lastActionFlags_=actionFlags;
+        Event e{};e.kind=4;e.tick=now;e.thread=GetCurrentThreadId();e.target=value.id;e.recovery=value.valid;
+        e.args={value.hero,value.module,0,actionFlags};sc::readMemory(value.module+8,e.args[2]);
+        uintptr_t modules{};
+        if(sc::readMemory(value.hero+0x1ff8,modules) && sc::readMemory(modules+0x18,e.data))read(e.data,e.before);
+        e.after=e.before;queue(e);
+    }
     // The host has already matched the complete executable and both setter
     // signatures. Installation happens before any bridge vital writes.
     bool install(uintptr_t base,bool signaturesVerified,const std::filesystem::path &root){

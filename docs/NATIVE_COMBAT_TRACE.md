@@ -2,8 +2,7 @@
 
 This is an opt-in diagnostic for the already fingerprinted Sekiro 1.06
 executable. Set `combat_trace=1` only while collecting a native gameplay sample.
-The default is `0`. No Minecraft attack is dispatched through an unverified
-native hit or deathblow ABI.
+The default is `0`. Native normal-hit dispatch is separately opt-in with `native_hits=1`. The candidate phase profile remains off with `native_phase_finish=0` until directed validation.
 
 The original HP and posture setters remain responsible for their results.
 The trace records requested and actual values, the native thread and executable
@@ -40,8 +39,7 @@ resolved for each dispatch; trace addresses can become invalid after respawn.
 An experimental normal-hit backend is available with `native_hits=1` (default
 0). It constructs a zeroed, owned packet using the native initializer, fills
 explicit scalar fields of the observed ordinary Kusabimaru profile, resolves
-the PC attack PARAM row on each call, and calls B6A040. It uses normal attack
-type 1, never deathblow type 5. Pending MC commands drain only at the signature
+the PC attack PARAM row on each call, and calls B6A040. Its ordinary damage path uses attack type 1. A separate disabled phase candidate constructs type 5 with a fresh initializer and the scalar identity of Boss sample 67. Signature matching alone does not prove script gates, animation or rewards; do not enable it as an accepted release feature. Pending MC commands drain only at the signature
 guarded AttackManager update 9A0DC0 with a current manager, positive frame
 delta and fresh peer/session. Physics callbacks do not dispatch these hits.
 Every relevant code entry and both current damage-module owners are checked.
@@ -49,11 +47,11 @@ Commands rejected by a guard are acknowledged without retry or HP fallback.
 Engine block/deflect, damage values, hit reactions and rewards need live
 acceptance; the backend is not a complete native combat API.
 The periodic log reports `nativeHitFailure`: 0 dispatched, 1 invalid input,
-2 target module, 3 attacker module, 4 PARAM manager, 5 missing attack row.
+2 target module, 3 attacker module, 4 PARAM manager, 5 missing attack row, 6 invalid impact geometry, 7 phase profile signature mismatch. Phase counters describe dispatched calls and immediate node observations only; they do not assert reward completion.
 
 Compatibility HP damage now retains at least 1 HP for actors with remaining
 Boss nodes even when their NoDeath bit is absent. It never edits those nodes.
-Boss deathblow animation/control handoff remains unimplemented.
+Action control now observes the read-only animation chain WorldChrMan -> hero+1FF8 -> module+10 -> id+20. Its owner checks and idle-return condition require live validation; the fixed minimum wait is removed. A changed animation confirms a request, two baseline samples return control, an unstarted request expires at 500 ms, and a 20 s watchdog bounds a stuck handoff. Native-menu time is excluded from that watchdog.
 
 The second diagnostic additionally records the entry at `B68FF0`, guarded by
 its complete 24-byte prologue. An assembly probe saves volatile integer/SIMD
@@ -81,3 +79,5 @@ existing adapter, negative-posture behavior and Boss HP floor; 49 native-hit
 checks cover update-hook register preservation, current owners, PARAM lookup,
 fresh peer/frame guards and command deduplication. Live acceptance of MC-driven
 hit reactions, Boss deathblows and rewards remains pending.
+
+Animation records have `kind:"animation-state"`; actionFlags in args[3] identify handoff=1, confirmed=2, R=4, G=8, native UI=16, MC owner=32. They correlate current animation id, module/hero identity and HP/posture/node with hit records. GUI tracing uses MC `sekirobridge/bridge.properties` `gui_trace=true`, limited to 64 clicks, with the actual HandledScreen slot and a delayed integrated-server revision/cursor observation.

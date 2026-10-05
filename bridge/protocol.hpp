@@ -10,10 +10,10 @@
 namespace bridge {
 // Fixed little-endian ABI. Java Protocol.java is its other implementation.
 constexpr uint32_t magic = 0x31504253; // SBP1
-constexpr uint32_t version = 1, maxWidth = 1920, maxHeight = 1080;
+constexpr uint32_t version = 2, maxWidth = 1920, maxHeight = 1080;
 constexpr uint32_t maxPixels = maxWidth * maxHeight, slots = 3;
 constexpr uint32_t maxFrameBytes = maxPixels * 12;
-enum Flags : uint32_t { Scene = 1, Focus = 2, Edit = 4, Menu = 8, Reset = 16, NativeDead = 32, NativeAction = 64 };
+enum Flags : uint32_t { Scene = 1, Focus = 2, Edit = 4, Menu = 8, Reset = 16, NativeDead = 32, NativeAction = 64, NativeUI=128 };
 enum Capabilities : uint32_t {
     CameraSync = 1,
     Input = 2,
@@ -47,14 +47,17 @@ struct alignas(8) FrameMeta {
     float eye[3]{}, forward[3]{};
     float fovY{}, aspect{}, nearZ{}, farZ{};
     uint64_t controlTickMs{};
+    uint64_t guiGeneration{};
+    uint32_t guiWidth{}, guiHeight{}; // Captured Screen's scaled dimensions.
 };
-static_assert(sizeof(FrameMeta) == 96);
+static_assert(sizeof(FrameMeta) == 112);
 struct Frame {
     FrameMeta meta;
     std::vector<uint8_t> pixels; // RGBA world, float32 GL depth [0,1], RGBA overlay
 };
 inline bool valid(const FrameMeta &m) {
-    if (!m.sequence || !m.epoch || !m.width || !m.height || m.width > maxWidth || m.height > maxHeight ||
+    if ((m.guiGeneration && (!m.guiWidth || !m.guiHeight || m.guiWidth>16384 || m.guiHeight>16384)) ||
+        !m.sequence || !m.epoch || !m.width || !m.height || m.width > maxWidth || m.height > maxHeight ||
         m.width * uint64_t(m.height) > maxPixels || (m.flags & ~(BottomUp | Overlay | ExplicitYaw)))
         return false;
     if ((m.flags & ExplicitYaw) && (!std::isfinite(std::bit_cast<float>(m.reserved)) ||

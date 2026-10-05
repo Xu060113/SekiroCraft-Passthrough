@@ -18,15 +18,17 @@ int main(){int n{};auto check=[&](bool b,const char*s){++n;if(!b)throw std::runt
     CombatState state;state.sequence=1;state.epoch=7;state.hero=2;state.flags=1;state.hp=250;state.maxHp=500;
     check(validCombat(state),"valid native life");state.hp=501;check(!validCombat(state),"invalid HP");state.hp=250;
     state.posture=101;state.maxPosture=100;check(!validCombat(state),"posture above maximum rejected");state.posture=80;
-    state.count=65;check(!validCombat(state),"actor overflow");state.count=1;auto &a=state.actors[0];a.id=9;a.hp=100;a.maxHp=200;
+    state.count=65;check(!validCombat(state),"actor overflow");state.count=1;auto &a=state.actors[0];a.id=9;a.stage=1;a.hp=100;a.maxHp=200;
     check(validCombat(state),"actor");a.position.x=NAN;check(!validCombat(state),"invalid actor");a.position.x=0;
     CombatReport p;p.tick=100;p.epoch=7;p.hero=2;p.session=3;
-    check(validCombat(p),"empty report");p.command=1;p.commands[0]={1,9,6,0};check(validCombat(p),"valid hit");
+    check(validCombat(p),"empty report");p.command=1;p.commands[0]={1,9,6,0,1};check(validCombat(p),"valid hit");
+    p.commands[0].stage=0;check(!validCombat(p),"hit without current actor stage is rejected");p.commands[0].stage=1;
+    p.commands[0].kind=6;check(!validCombat(p),"unknown damage source is rejected");p.commands[0].kind=0;
     p.commands[0].sequence=2;check(!validCombat(p),"ring sequence mismatch");p.commands[0].sequence=1;
     p.commands[0].amount=NAN;check(!validCombat(p),"nonfinite injury");p.commands[0].amount=6;
     p.damage=-1;check(!validCombat(p),"negative cumulative injury");p.damage=0;
-    for(size_t i=0;i<damageSlots;++i)p.commands[i]={i+1,9,6,0};p.command=64;
-    check(validCombat(p),"full report");p.command=65;p.commands[0]={65,9,1,0};check(validCombat(p),"wrapped ring");
+    for(size_t i=0;i<damageSlots;++i)p.commands[i]={i+1,9,6,0,1};p.command=64;
+    check(validCombat(p),"full report");p.command=65;p.commands[0]={65,9,1,0,1};check(validCombat(p),"wrapped ring");
     check(damageHp(500,1000,.1,0)==400,"MC damage ratio");
     check(damageHp(400,1000,0,.1)==500,"MC healing ratio");
     check(damageHp(10,1000,1,0)==0,"death clamped");check(damageHp(900,1000,0,1)==1000,"heal clamped");
@@ -74,7 +76,7 @@ int main(){int n{};auto check=[&](bool b,const char*s){++n;if(!b)throw std::runt
     check(memory.combatState.read(state) && state.count==1 && state.actors[0].posture==200 &&
           state.actors[0].bossNode==2 && (state.actors[0].flags&4),"boss counters and native NoDeath exported");
     p={};p.tick=GetTickCount64();p.epoch=8;p.hero=state.hero;p.session=9;p.command=1;
-    p.commands[0]={1,state.actors[0].id,40,0};memory.combatReport.write(p);combat.tick(8,true);
+    p.commands[0]={1,state.actors[0].id,40,0,1};memory.combatReport.write(p);combat.tick(8,true);
     check(*reinterpret_cast<int*>(npcData.data()+0x130)==1 && *reinterpret_cast<int*>(npcData.data()+0x148)==0 &&
           fixturePostureCalls==1,"production dispatch uses HP and posture setters, preserves boss NoDeath");
     combat.tick(8,true);check(fixturePostureCalls==1,"acknowledged command never replays posture damage");
@@ -82,15 +84,15 @@ int main(){int n{};auto check=[&](bool b,const char*s){++n;if(!b)throw std::runt
     put(npcData,0x148,int(-20));Sleep(80);combat.tick(8,true);memory.combatState.read(state);
     check(state.actors[0].posture==0 && state.actors[0].maxPosture==200 && state.actors[0].bossNode==2,
         "native negative posture publishes a full gauge and retains boss node");
-    p.tick=GetTickCount64();p.command=2;p.commands[1]={2,state.actors[0].id,1,0};
+    p.tick=GetTickCount64();p.command=2;p.commands[1]={2,state.actors[0].id,1,0,1};
     memory.combatReport.write(p);combat.tick(8,true);
     check(fixturePostureCalls==1 && *reinterpret_cast<int*>(npcData.data()+0x148)==-20,
         "bridge damage cannot recover an already broken posture remainder");
     put(npcData,0x148,int(200));
-    npcData[0x228]|=16;p.tick=GetTickCount64();p.command=3;p.commands[2]={3,state.actors[0].id,1,0};
+    npcData[0x228]|=16;p.tick=GetTickCount64();p.command=3;p.commands[2]={3,state.actors[0].id,1,0,1};
     memory.combatReport.write(p);combat.tick(8,true);check(fixturePostureCalls==1,"NoPostureConsume is respected");
     npcData[0x228]=0;put(npcData,0x130,int(1000));
-    p.tick=GetTickCount64();p.command=4;p.commands[3]={4,state.actors[0].id,40,0};
+    p.tick=GetTickCount64();p.command=4;p.commands[3]={4,state.actors[0].id,40,0,1};
     memory.combatReport.write(p);combat.tick(8,true);
     check(*reinterpret_cast<int*>(npcData.data()+0x130)==1 && *reinterpret_cast<int*>(npcData.data()+0x25c)==2,
         "compatibility damage preserves a Boss node without native NoDeath bit");

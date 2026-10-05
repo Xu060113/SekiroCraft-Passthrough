@@ -41,7 +41,7 @@ public final class CombatSelfTest {
         b.putLong(0,1).putLong(8,1000).putLong(16,12).putLong(24,34).putInt(40,250).putInt(44,500).putInt(48,1)
             .putInt(52,1).putLong(88,56).putFloat(96,2).putFloat(100,3).putFloat(104,4)
             .putInt(108,100).putInt(112,200).putInt(116,6).putInt(120,5)
-            .putInt(80,80).putInt(84,100).putInt(124,0).putInt(128,200).putInt(132,2);
+            .putInt(80,80).putInt(84,100).putInt(124,0).putInt(128,200).putInt(132,2).putLong(136,1);
         var s=CombatProtocol.decode(b);
         check(s!=null && s.hp()==250 && s.hero()==34 && s.actors().get(0).maxHp()==200,"packed native offsets");
         check(s.posture()==80 && s.maxPosture()==100 && s.actors().get(0).bossNode()==2,"native remaining posture and boss node offsets");

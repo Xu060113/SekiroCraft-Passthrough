@@ -2,6 +2,9 @@ $ErrorActionPreference='Stop'
 $root=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $testRoot=Join-Path $root ('.cache\update-installer-tests\'+[Guid]::NewGuid().ToString('N'))
 $checks=0
+# The fixtures never replace a running game's files. Isolate their process guard
+# from a developer's unrelated Gradle JVM or game session.
+function Get-Process {param($Name,$ErrorAction);return @()}
 function Check($ok,$label){$script:checks++;if(!$ok){throw $label}}
 function Fixture([string]$name){
     $dir=Join-Path $testRoot $name
@@ -85,3 +88,38 @@ Remove-Item Function:\Move-Item
 Check ($failed -and (Get-FileHash "$($f.game)\sekirobridge.ini").Hash -eq $before) 'failure rolls config back with both peers'
 Check ((Get-Content "$($f.dir)\runtime\combat-trace-session.json" -Raw|ConvertFrom-Json).active) 'failed update retains prior trace session'
 Write-Output "$checks total paired-update and life/action rollback checks passed."
+function GuiFixture([string]$name){
+    $f=LifeFixture $name
+    $manifest=Get-Content "$($f.dir)\build\verification.json" -Raw|ConvertFrom-Json
+    $manifest.patch='gameplay4-gui-native-combat'
+    $manifest|Add-Member -NotePropertyName protocol -NotePropertyValue 2
+    $manifest|ConvertTo-Json -Depth 6|Set-Content "$($f.dir)\build\verification.json"
+    New-Item -ItemType Directory -Path "$($f.mc)\sekirobridge" -Force|Out-Null
+    Set-Content "$($f.mc)\sekirobridge\bridge.properties" "channel=custom`ngui_trace=false"
+    Set-Content "$($f.dir)\runtime\combat-trace.stop" 'previous session'
+    return $f
+}
+$f=GuiFixture 'gui-diagnostic'
+& "$($f.dir)\scripts\update-installed.ps1" -MinecraftDirectory $f.mc -Diagnostic|Out-Null
+$ini=Get-Content "$($f.game)\sekirobridge.ini" -Raw
+Check ($ini -match 'combat_trace=1' -and $ini -match 'native_hits=1' -and $ini -match 'native_phase_finish=0') 'diagnostic enables recording and normal hits but keeps unaccepted phase profile off'
+Check ((Get-Content "$($f.mc)\sekirobridge\bridge.properties" -Raw) -match 'channel=custom[\s\S]*gui_trace=true') 'GUI diagnostic retains channel and enables bounded tracing'
+Check (!(Test-Path "$($f.dir)\runtime\combat-trace.stop")) 'old stop marker does not silently stop new capture'
+Check ((Get-Content "$($f.dir)\runtime\combat-trace-session.json" -Raw|ConvertFrom-Json).active) 'diagnostic session active'
+$f=GuiFixture 'gui-rollback'
+function Move-Item {
+    param([string]$LiteralPath,[string]$Destination,[switch]$Force)
+    if($Destination.EndsWith('sekiro-minecraft-passthrough-0.1.0.jar')){throw 'forced GUI package JAR failure'}
+    Microsoft.PowerShell.Management\Move-Item @PSBoundParameters
+}
+$failed=$false;try{& "$($f.dir)\scripts\update-installed.ps1" -MinecraftDirectory $f.mc -Diagnostic|Out-Null}catch{$failed=$true}
+Remove-Item Function:\Move-Item
+Check ($failed -and (Get-Content "$($f.game)\dinput8.dll") -eq 'old host') 'diagnostic rollback restores host'
+Check ((Get-Content "$($f.mc)\sekirobridge\bridge.properties" -Raw) -match 'gui_trace=false') 'diagnostic rollback restores GUI properties'
+Check (Test-Path "$($f.dir)\runtime\combat-trace.stop") 'diagnostic rollback restores trace stop marker'
+$f=GuiFixture 'gui-wrong-protocol'
+$manifest=Get-Content "$($f.dir)\build\verification.json" -Raw|ConvertFrom-Json
+$manifest.protocol=1;$manifest|ConvertTo-Json -Depth 6|Set-Content "$($f.dir)\build\verification.json"
+$failed=$false;try{& "$($f.dir)\scripts\update-installed.ps1" -MinecraftDirectory $f.mc -Diagnostic|Out-Null}catch{$failed=$true}
+Check ($failed -and (Get-Content "$($f.game)\dinput8.dll") -eq 'old host') 'old protocol rejected before mutation'
+Write-Output "$checks total paired-update, diagnostic and rollback checks passed."

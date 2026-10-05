@@ -4,7 +4,8 @@
 
 namespace bridge {
 // Sekiro 1.06 only. This backend constructs an owned normal-sword packet. It
-// never keeps a live trace packet, attacker pointer, or deathblow attack type.
+// never keeps a live trace packet or attacker pointer. The separate phase profile
+// is an opt-in candidate until MC-driven stage changes and rewards are accepted.
 // Call only from the fingerprinted AttackManager update, after actor lookup.
 class NativeHitBackend {
     uintptr_t base_{}; bool ready_{};
@@ -41,10 +42,17 @@ class NativeHitBackend {
     }
     bool ready()const{return ready_;}
     uint32_t lastFailure()const{return failure_.load(std::memory_order_relaxed);}
+    bool phaseReady()const{
+        return ready_ && code(0xb6e7c5,std::array<uint8_t,7>{0x41,0x83,0x7e,0x28,0x05,0x75,0x4a}) &&
+            code(0xb6e800,std::array<uint8_t,6>{0x89,0x91,0x5c,0x02,0x00,0x00}) &&
+            code(0x9f0410,std::array<uint8_t,11>{0x48,0x8b,0xc4,0x57,0x48,0x81,0xec,0xa0,0x00,0x00,0x00});
+    }
     bool dispatch(uintptr_t attacker,uintptr_t target,const sc::Vec3 &from,const sc::Vec3 &to,
-                  int32_t maxHp,int32_t maxPosture,float amount)const {
+                  int32_t maxHp,int32_t maxPosture,const DamageCommand &command,bool finish=false)const {
+        auto amount=command.amount;
+        if(finish && !phaseReady()){failure_=7;return false;}
         if(!ready_ || !attacker || attacker==target || !sc::finite(from) || !sc::finite(to) ||
-           sc::length(to-from)>32 || maxHp<=0 || maxHp>10000000 || maxPosture<0 || maxPosture>10000000 ||
+           sc::length(to-from)>64 || maxHp<=0 || maxHp>10000000 || maxPosture<0 || maxPosture>10000000 ||
            !std::isfinite(amount) || amount<=0 || amount>10000){failure_=1;return false;}
         auto module=damageModule(target);
         if(!module){failure_=2;return false;}
@@ -54,9 +62,10 @@ class NativeHitBackend {
         // The PC category and ordinary Kusabimaru parameter are present in the
         // live normal-hit samples. Resolve them anew; no cached PARAM row.
         ParamRef param;
-        reinterpret_cast<ParamLookup>(base_+0x10b5160)(&param,1,5000061);
+        int32_t profile=finish?5000600:5000061;
+        reinterpret_cast<ParamLookup>(base_+0x10b5160)(&param,1,profile);
         uint8_t floor{};
-        if(!param.row || param.index!=5000061 || param.category!=1 ||
+        if(!param.row || param.index!=profile || param.category!=1 ||
            !sc::readMemory(param.row+0x196,floor)){failure_=5;return false;}
         Packet packet;
         reinterpret_cast<Initialize>(base_+0x997890)(&packet);
@@ -73,8 +82,19 @@ class NativeHitBackend {
         packet.put(0xdc,1.f);packet.put(0xe0,posture);packet.put(0xe4,int32_t(1));
         packet.put(0xf4,uint8_t(5));packet.put(0xf8,int32_t(2110));packet.put(0x114,0.f);
         packet.put(0x118,0.f);packet.put(0x11c,int32_t(5000));
-        const std::array<float,4> position{to.x,to.y+1.f,to.z,1.f};
-        auto direction=sc::normalize(to-from);
+        if(finish){
+            // Scalar identity of natural Boss sample 67. Initialize a new packet
+            // for every invocation; position/owner and all native pointers are fresh.
+            packet.put(0,24000.f);packet.put(0x20,0.f);packet.put(0x24,int32_t(0));
+            packet.put(0x28,int32_t(5));packet.put(0x2c,int32_t(5));packet.put(0x30,int32_t(1));
+            packet.put(0x40,int32_t(90));packet.put(0x4c,int32_t(105000600));packet.put(0x50,profile);
+            packet.put(0x7c,uint32_t(1));packet.put(0xd0,int32_t(-1));packet.put(0xd4,int32_t(-1));
+            packet.put(0xd8,uint32_t(0x10200));packet.put(0xe0,0.f);
+        }
+        auto impact=(command.flags&1)?command.impact:to+sc::Vec3{0,1,0};
+        if(!sc::finite(impact) || sc::length(impact-to)>12){failure_=6;return false;}
+        const std::array<float,4> position{impact.x,impact.y,impact.z,1.f};
+        auto direction=(command.flags&1)?command.direction:sc::normalize(to-from);
         const std::array<float,4> normal{direction.x,direction.y,direction.z,0.f};
         packet.put(0x130,position);packet.put(0x140,normal);packet.put(0x150,normal);
         packet.put(0x190,attacker);packet.put(0x198,target);

@@ -1,5 +1,6 @@
 #pragma once
 #include "../bridge/protocol.hpp"
+#include "../bridge/session.hpp"
 #include "sekirocraft/math.hpp"
 #include <d3d11.h>
 #include <d3dcompiler.h>
@@ -436,8 +437,8 @@ float4 overlay(Out i):SV_TARGET{return World.SampleLevel(Point,frameUV(i.uv),0);
         c->OMSetBlendState(blend_.Get(), nullptr, 0xffffffff);
         c->OMSetDepthStencilState(noDepth_.Get(), 0);
         c->RSSetState(raster_.Get());
-        float w = std::min(width, height * frameMeta_.aspect), h = w / frameMeta_.aspect;
-        D3D11_VIEWPORT vp{(width - w) / 2, (height - h) / 2, w, h, 0, 1};
+        auto rect=GuiDisplay::fit(frameMeta_,width,height,0);
+        D3D11_VIEWPORT vp{rect.x,rect.y,rect.width,rect.height,0,1};
         c->RSSetViewports(1, &vp);
         c->IASetInputLayout(nullptr);
         c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);

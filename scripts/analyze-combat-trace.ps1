@@ -14,6 +14,10 @@ for($traceIndex=0;$traceIndex -lt $traceLines.Count;$traceIndex++){
 }
 $traceChanges=@($traceEvents | Where-Object {$_.after.hp -ne $_.before.hp -or $_.after.posture -ne $_.before.posture -or $_.after.bossNode -ne $_.before.bossNode})
 $traceNativeHits=@($traceEvents|Where-Object {$_.kind -eq 'native-hit-entry'})
+$traceAnimations=@($traceEvents|Where-Object {$_.kind -eq 'animation-state'})
+$traceAnimationStates=@($traceAnimations|ForEach-Object {
+ @{tick=$_.tick;id=$_.target;valid=[bool]$_.recovery;hero=$_.args[0];module=$_.args[1];owner=$_.args[2];actionFlags=[Convert]::ToUInt32($_.args[3].Substring(2),16)}
+})
 $tracePhaseChanges=@();$tracePending=@{}
 foreach($traceEvent in $traceEvents){
  $traceKey='{0}:{1}' -f $traceEvent.thread,$traceEvent.data
@@ -49,5 +53,6 @@ $traceReport=@{trace=$TracePath;records=$traceEvents.Count;effectiveChanges=$tra
  nativePostureLosses=@($traceChanges|Where-Object {$_.source -eq 'native' -and $_.after.posture -lt $_.before.posture}).Count;
  bossNodeTransitions=@($traceChanges|Where-Object {$_.before.bossNode -ne $_.after.bossNode}).Count;
  nativeHitEntries=$traceNativeHits.Count;correlatedBossPhaseChanges=$tracePhaseChanges;
+ animationSamples=$traceAnimations.Count;validAnimationSamples=@($traceAnimations|Where-Object {$_.recovery -eq 1}).Count;animationStates=$traceAnimationStates;
  nativeDamageAbiVerified=$false;nativeDeathblowAbiVerified=$false}
 $traceReport|ConvertTo-Json -Depth 8

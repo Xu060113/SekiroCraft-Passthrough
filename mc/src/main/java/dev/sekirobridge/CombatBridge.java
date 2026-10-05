@@ -60,11 +60,25 @@ public final class CombatBridge {
     public static boolean serverActive(){return serverActive;}
     static CombatProtocol.State snapshot(){return state;}
     public static String status(){var s=state;return s==null?"waiting":("native HP="+s.hp()+"/"+s.maxHp()+" actors="+s.actors().size());}
-    public static void hit(long actor,long expectedEpoch,float amount){
-        if(!serverActive || expectedEpoch!=epoch || !Float.isFinite(amount) || amount<=0 || amount>10000)return;
+    public static void hit(NativeActorProxy target,net.minecraft.entity.damage.DamageSource source,float amount){
+        if(!serverActive || target.epoch!=epoch || target.stage==0 || !Float.isFinite(amount) || amount<=0 || amount>10000)return;
         if(command-ackCommand>=CombatProtocol.SLOTS)return; // Never overwrite unacknowledged hits.
-        int o=64+(int)(command%CombatProtocol.SLOTS)*24;
-        report.putLong(o,++command).putLong(o+8,actor).putFloat(o+16,amount).putInt(o+20,0);
+        var direct=source.getSource();var attacker=source.getAttacker();var pose=BridgeClient.state();
+        if(pose==null || pose.epoch()!=epoch)return;
+        int kind=direct instanceof net.minecraft.entity.projectile.TridentEntity?2:
+            direct instanceof net.minecraft.entity.projectile.PersistentProjectileEntity?1:
+            source.isIn(net.minecraft.registry.tag.DamageTypeTags.IS_EXPLOSION)?3:
+            direct instanceof net.minecraft.entity.projectile.ProjectileEntity?5:
+            attacker instanceof MobEntity?4:0;
+        var point=direct instanceof net.minecraft.entity.projectile.ProjectileEntity?direct.getPos():target.getBoundingBox().getCenter();
+        var direction=direct instanceof net.minecraft.entity.projectile.ProjectileEntity?direct.getVelocity().normalize():
+            attacker!=null?point.subtract(attacker.getEyePos()).normalize():net.minecraft.util.math.Vec3d.ZERO;
+        int o=64+(int)(command%CombatProtocol.SLOTS)*CombatProtocol.COMMAND_BYTES;
+        report.putLong(o,++command).putLong(o+8,target.nativeId).putFloat(o+16,amount).putInt(o+20,kind).putLong(o+24,target.stage);
+        report.putFloat(o+32,(float)(point.x/pose.scale())).putFloat(o+36,(float)((point.y-pose.yOffset())/pose.scale()))
+            .putFloat(o+40,(float)(-point.z/pose.scale()));
+        report.putFloat(o+44,(float)direction.x).putFloat(o+48,(float)direction.y).putFloat(o+52,(float)-direction.z)
+            .putInt(o+56,1).putInt(o+60,0);
     }
     public static void server(MinecraftServer server){
         var s=state;var pose=BridgeClient.state();var client=MinecraftClient.getInstance();long now=NativeBridge.clockMs();
@@ -89,14 +103,14 @@ public final class CombatBridge {
             new net.minecraft.network.packet.s2c.play.EntityDamageS2CPacket(p,p.getDamageSources().generic()));
         var keep=new HashSet<Long>();
         if(BridgeClient.connected() && p.isAlive())for(var a:s.actors()){
-            if(a.hp()==0)continue;keep.add(a.id());var proxy=proxies.get(a.id());
+            if(a.hp()==0 && a.bossNode()==0)continue;keep.add(a.id());var proxy=proxies.get(a.id());
             if(proxy==null || proxy.isRemoved() || proxy.getWorld()!=p.getWorld()){
                 if(proxy!=null)proxy.discard();proxy=TYPE.create(p.getServerWorld());if(proxy==null)continue;
                 proxy.nativeId=a.id();proxy.epoch=epoch;proxies.put(a.id(),proxy);
                 proxy.refreshPositionAndAngles(pose.mcX(a.x()),pose.mcY(a.y()),pose.mcZ(a.z()),0,0);
                 p.getServerWorld().spawnEntity(proxy);
             }
-            proxy.nativeFlags=a.flags();proxy.setHealth(Math.max(.001f,20f*a.hp()/a.maxHp()));
+            proxy.nativeFlags=a.flags();proxy.stage=a.stage();proxy.setHealth(Math.max(.001f,20f*a.hp()/a.maxHp()));
             proxy.refreshPositionAndAngles(pose.mcX(a.x()),pose.mcY(a.y()),pose.mcZ(a.z()),0,0);
         }
         proxies.entrySet().removeIf(entry -> {if(keep.contains(entry.getKey()))return false;entry.getValue().discard();return true;});

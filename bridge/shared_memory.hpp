@@ -80,9 +80,9 @@ class SharedMemory {
         if (!validChannel(channel))
             return false;
         if (!physics.open(channel)) return false;
-        if (!input.open(channel,L"input-v2") || !player.open(channel,L"player-v2") ||
-            !terrain.open(channel,L"terrain-v2") || !combatState.open(channel,L"combat-state-v2") ||
-            !combatReport.open(channel,L"combat-report-v1") || !nativeAction.open(channel,L"native-action-v1") ||
+        if (!input.open(channel,L"input-v3") || !player.open(channel,L"player-v2") ||
+            !terrain.open(channel,L"terrain-v2") || !combatState.open(channel,L"combat-state-v3") ||
+            !combatReport.open(channel,L"combat-report-v2") || !nativeAction.open(channel,L"native-action-v1") ||
             !projectileRays.open(channel,L"projectile-rays-v1") || !projectileHits.open(channel,L"projectile-hits-v1")) {close();return false;}
         auto name = L"Local\\SekiroBridge-" + channel;
         mutex_ = CreateMutexW(nullptr, FALSE, (name + L"-lock").c_str());

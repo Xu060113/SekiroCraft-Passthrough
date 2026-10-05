@@ -9,6 +9,7 @@ uint32_t scTraceVector[4]{0x12345678,0x87654321,0xabcdef01,0x10fedcba},scTraceOb
 }
 static uintptr_t targetChr{},targetData{},attackerChr{},paramRow{};
 static int hitCalls{},initCalls{},hpCalls{},lookupCalls{};static bool hasParam=true;
+static sc::Vec3 lastPoint{},lastDirection{};
 template<class T>T field(uintptr_t p,size_t at){T value;std::memcpy(&value,reinterpret_cast<void*>(p+at),sizeof(value));return value;}
 template<class T>void store(uintptr_t p,size_t at,T value){std::memcpy(reinterpret_cast<void*>(p+at),&value,sizeof(value));}
 static uintptr_t init(void *packet){++initCalls;auto p=reinterpret_cast<uintptr_t>(packet);
@@ -30,6 +31,7 @@ static void hit(uintptr_t module,uintptr_t source,void *packet){auto p=reinterpr
         throw std::runtime_error("status/defaults and pointer-bearing tail retained");
     if(!bridge::bridgeVitalWriteDepth)throw std::runtime_error("native bridge trace scope");
     ++hitCalls;
+    lastPoint=field<sc::Vec3>(p,0x130);lastDirection=field<sc::Vec3>(p,0x140);
     auto hp=field<int32_t>(targetData,0x130);auto amount=int(field<float>(p,0));
     store(targetData,0x130,std::max(1,hp-amount)); // fixture engine owns its outcome
     store(targetData,0x148,std::max(0,field<int32_t>(targetData,0x148)-int(field<float>(p,0xe0))));
@@ -80,7 +82,7 @@ int main(){int checks{};auto check=[&](bool ok,const char *message){++checks;if(
     for(auto data:{ptr(heroData),targetData}){store(data,0x130,int32_t(1000));store(data,0x134,int32_t(1000));store(data,0x148,int32_t(200));store(data,0x14c,int32_t(200));}
     store(targetData,0x25c,int32_t(2));adapter.enableNativeHits(true);adapter.tick(9,true);adapter.observe(ptr(targetPhysics));Sleep(80);adapter.tick(9,true);
     bridge::CombatState state;check(memory.combatState.read(state) && state.count==1,"current native actor registry");
-    bridge::CombatReport report;report.tick=GetTickCount64();report.epoch=9;report.hero=state.hero;report.session=7;report.command=1;report.commands[0]={1,state.actors[0].id,2,0};memory.combatReport.write(report);
+    bridge::CombatReport report;report.tick=GetTickCount64();report.epoch=9;report.hero=state.hero;report.session=7;report.command=1;report.commands[0]={1,state.actors[0].id,2,0,1};memory.combatReport.write(report);
     adapter.tick(9,true);check(hitCalls==0 && hpCalls==0,"physics callback defers native hit and does not double-write HP");
     adapter.gameTick(ptr(manager)+1,.016f);adapter.gameTick(ptr(manager),0);adapter.gameTick(ptr(manager),NAN);
     check(hitCalls==0,"wrong manager and paused/invalid frame reject native entry");
@@ -88,13 +90,24 @@ int main(){int checks{};auto check=[&](bool ok,const char *message){++checks;if(
     check(field<int32_t>(targetData,0x130)==900 && field<int32_t>(targetData,0x148)==180 && hpCalls==0,"native engine owns HP and posture outcomes");
     check(field<int32_t>(targetData,0x25c)==2 && bridge::bridgeVitalWriteDepth==0,"normal hits do not edit Boss nodes and trace scope unwinds");
     adapter.gameTick(ptr(manager),.016f);check(hitCalls==1,"acknowledged native command is not replayed");
-    report.command=2;report.commands[1]={2,state.actors[0].id,2,0};report.tick=GetTickCount64();memory.combatReport.write(report);adapter.tick(9,true);
+    report.command=2;report.commands[1]={2,state.actors[0].id,2,0,1};report.tick=GetTickCount64();memory.combatReport.write(report);adapter.tick(9,true);
     store(ptr(targetDamage),8,uintptr_t(0));adapter.gameTick(ptr(manager),.016f);check(hitCalls==1 && adapter.rejected==1 && hpCalls==0 && adapter.nativeHitFailure()==2,"freed/replaced damage-module owner rejects without HP fallback");store(ptr(targetDamage),8,targetChr);
-    report.command=3;report.commands[2]={3,state.actors[0].id,2,0};memory.combatReport.write(report);adapter.tick(9,true);hasParam=false;adapter.gameTick(ptr(manager),.016f);
+    report.command=3;report.commands[2]={3,state.actors[0].id,2,0,1};memory.combatReport.write(report);adapter.tick(9,true);hasParam=false;adapter.gameTick(ptr(manager),.016f);
     check(hitCalls==1 && initCalls==1 && adapter.rejected==2 && adapter.nativeHitFailure()==5,"missing native attack PARAM never creates a partial packet");hasParam=true;
-    report.command=4;report.commands[3]={4,state.actors[0].id,2,0};report.tick=1;memory.combatReport.write(report);adapter.tick(9,true);adapter.gameTick(ptr(manager),.016f);
+    report.command=4;report.commands[3]={4,state.actors[0].id,2,0,1};report.tick=1;memory.combatReport.write(report);adapter.tick(9,true);adapter.gameTick(ptr(manager),.016f);
     check(hitCalls==1,"stale peer cannot apply native damage");
     report.tick=GetTickCount64();memory.combatReport.write(report);adapter.tick(9,false);adapter.gameTick(ptr(manager),.016f);check(hitCalls==1,"inactive bridge cannot apply native damage");
+    check(!adapter.enablePhaseFinishes(true),"missing phase signatures refuse the opt-in stage backend");
+    store(targetData,0x25c,int32_t(1));
+    report.tick=GetTickCount64();report.command=5;report.commands[4]={5,state.actors[0].id,2,1,1};
+    memory.combatReport.write(report);adapter.tick(9,true);adapter.gameTick(ptr(manager),.016f);
+    check(hitCalls==1,"queued projectiles from the previous Boss stage are acknowledged without damaging the next stage");
+    store(ptr(targetPhysics),0x80,sc::Vec3{40,2,3});
+    report.command=6;report.commands[5]={6,state.actors[0].id,2,1,2,{40,3,3},{1,0,0},1,0};
+    memory.combatReport.write(report);adapter.tick(9,true);adapter.gameTick(ptr(manager),.016f);
+    check(hitCalls==2,"a fresh ranged hit between 32 and 64 metres reaches the native backend");
+    check(lastPoint.x==40 && lastPoint.y==3 && lastDirection.x==1,"projectile impact and direction survive native packet construction");
+    adapter.gameTick(ptr(manager),.016f);check(hitCalls==2,"ranged hit is dispatched once");
     std::cout<<checks<<" native hit ownership, game context, deduplication and register checks passed\n";
     VirtualFree(image,0,MEM_RELEASE);
 }

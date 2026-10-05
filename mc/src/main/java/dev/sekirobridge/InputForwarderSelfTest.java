@@ -15,12 +15,15 @@ public final class InputForwarderSelfTest {
     private static final class Target implements InputForwarder.Target {
         boolean screen=true;
         Object identity=new Object();long geometry;int active=-1,drags;
+        long generation=1;
         final List<String> calls=new ArrayList<>();
         final Map<Integer,Boolean> levels=new HashMap<>();
         float x,y;
         public boolean screenOpen(){return screen;}
         public Object screenIdentity(){return screen?identity:null;}
         public long cursorGeometry(){return geometry;}
+        public long guiGeneration(){return screen?generation:0;}
+        public void cancelPointer(){active=-1;}
         // Vanilla Mouse.onCursorPos enters mouseDragged whenever activeButton is
         // set, including a callback with identical coordinates.
         public void cursor(float x,float y){if(active>=0)++drags;this.x=x;this.y=y;calls.add("cursor:"+x+":"+y);}
@@ -46,12 +49,14 @@ public final class InputForwarderSelfTest {
         return Protocol.decode(bytes);
     }
     private static ByteBuffer packet(long tick,long sequence){
-        return Protocol.direct(4136).putLong(0,tick).putLong(8,7).putLong(16,sequence);
+        return Protocol.direct(Protocol.INPUT_BYTES).putLong(0,tick).putLong(8,7).putLong(16,sequence)
+            .putFloat(40,.9f).putFloat(44,.8f).putLong(48,1).putLong(56,tick);
     }
     private static void event(ByteBuffer packet,long sequence,int kind,int code,int action,int mods,float x,float y){
-        int at=40+(int)(sequence%128)*32;
+        int at=Protocol.INPUT_HEADER+(int)(sequence%128)*Protocol.INPUT_EVENT;
         packet.putInt(at,kind).putInt(at+4,code).putInt(at+8,action).putInt(at+12,mods);
         packet.putFloat(at+16,x).putFloat(at+20,y);
+        packet.putLong(at+32,packet.getLong(0)).putLong(at+40,1);
     }
     public static void main(String[] args){run();}
     public static void run(){
@@ -133,7 +138,7 @@ public final class InputForwarderSelfTest {
             moved.px(),moved.py(),moved.pz(),moved.ex(),moved.ey(),moved.ez(),moved.fx(),moved.fy(),moved.fz(),moved.fov(),moved.aspect(),
             moved.near(),moved.far(),moved.yOffset(),moved.scale(),moved.width(),moved.height(),moved.keys(),.8f,.7f,moved.wheel(),
             moved.buttons(),moved.command(),moved.textSequence(),moved.text(),moved.captureYaw());
-        input.update(moved,packet(226,17),226);
+        input.update(moved,packet(226,17).putFloat(40,.8f).putFloat(44,.7f),226);
         check(target.drags==1,"real pointer movement continues vanilla inventory dragging");
         input.release();target.calls.clear();input.update(control(230,Protocol.EDIT,0),packet(230,17),230);
         target.calls.clear();target.identity=new Object();input.update(control(231,Protocol.EDIT,0),packet(231,17),231);
@@ -153,6 +158,22 @@ public final class InputForwarderSelfTest {
         target.calls.clear();input.update(control(280,Protocol.EDIT|Protocol.NATIVE_DEAD,0),deathClick,280);
         check(target.presses(0)==1 && target.releases(0)==1,"native death retains ordered death-screen mouse clicks");
         input.release();
+        input.release();target.calls.clear();target.screen=true;target.generation=2;
+        input.update(control(300,Protocol.EDIT,0),packet(300,22),300);target.calls.clear();
+        var staleScreen=packet(310,24);event(staleScreen,22,2,0,1,0,.25f,.25f);event(staleScreen,23,2,0,0,0,.25f,.25f);
+        input.update(control(310,Protocol.EDIT,0),staleScreen,310);
+        check(target.presses(0)==0 && target.calls.isEmpty(),"old rendered Screen cannot click or move a replacement Screen");
+        var freshScreen=packet(320,26).putLong(48,2);event(freshScreen,24,2,0,1,0,.25f,.25f);event(freshScreen,25,2,0,0,0,.25f,.25f);
+        freshScreen.putLong(64+24*48+40,2).putLong(64+25*48+40,2);
+        input.update(control(320,Protocol.EDIT,0),freshScreen,320);
+        check(target.presses(0)==1 && target.releases(0)==1,"new Screen receives clicks only from its displayed generation");
+        target.calls.clear();var bar=packet(330,28).putLong(48,2);event(bar,26,2,0,1,0,-.1f,.5f);event(bar,27,2,0,0,0,-.1f,.5f);
+        bar.putLong(64+26*48+40,2).putLong(64+27*48+40,2);input.update(control(330,Protocol.EDIT,0),bar,330);
+        check(target.presses(0)==0,"a black bar does not clamp to an edge inventory slot");
+        target.calls.clear();var nativeMenu=packet(340,30).putLong(48,2);event(nativeMenu,28,2,0,1,0,.5f,.5f);event(nativeMenu,29,2,0,0,0,.5f,.5f);
+        nativeMenu.putLong(64+28*48+40,2).putLong(64+29*48+40,2);
+        input.update(control(340,Protocol.EDIT|Protocol.NATIVE_UI,0),nativeMenu,340);
+        check(target.presses(0)==0,"Sekiro UI ownership cannot click an underlying MC Screen");
         System.out.println("PASS "+checks+" production input replay checks");
     }
 }

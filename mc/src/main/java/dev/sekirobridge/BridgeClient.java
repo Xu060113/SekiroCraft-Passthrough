@@ -84,6 +84,7 @@ public final class BridgeClient implements ClientModInitializer {
         ProjectileTerrain.poll();
         AudioBridge.tick();
         CombatBridge.poll();
+        InputForwarder.traceGuiResult();
         DeathSync.tick();
         if (handle != 0)
             NativeBridge.status(handle, connected() ? (1 | 8 | (client.currentScreen != null ? 2 : 0) |
@@ -129,10 +130,11 @@ public final class BridgeClient implements ClientModInitializer {
                 }
             }
             NativeBridge.load(root);
+            InputForwarder.guiTrace=Boolean.parseBoolean(p.getProperty("gui_trace","false"));
             handle = NativeBridge.open(p.getProperty("channel", "default"));
             if (handle == 0)
                 throw new IllegalStateException("Shared memory channel could not be opened");
-            LOG.info("Bridge ready, protocol v1; dormant until /sekirobridge on in a dedicated " +
+            LOG.info("Bridge ready, protocol v2; dormant until /sekirobridge on in a dedicated " +
                      "single-player world");
         } catch (Exception | UnsatisfiedLinkError e) {
             LOG.error("Bridge disabled; Minecraft remains usable", e);

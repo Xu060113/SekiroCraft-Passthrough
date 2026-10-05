@@ -16,6 +16,8 @@ public final class FrameExporter implements AutoCloseable {
         long fence;
         long captureSequence, capturedAt;
         int width, height;
+        long guiGeneration;
+        int guiWidth,guiHeight;
         Protocol.State pose;
     }
     private final Slot[] slots = {new Slot(), new Slot(), new Slot()};
@@ -69,8 +71,11 @@ public final class FrameExporter implements AutoCloseable {
                         GL21.GL_PIXEL_PACK_BUFFER, 0, (long)s.width * s.height * 12, GL30.GL_MAP_READ_BIT);
                     if (mapped != null) {
                         try {
+                            var metadata=Protocol.metadata(s.pose, ++sequence, s.width, s.height,s.capturedAt);
+                            metadata.putLong(96,s.guiGeneration).putInt(104,s.guiWidth).putInt(108,s.guiHeight);
+                            metadata.limit(Protocol.META_BYTES);
                             if (NativeBridge.publish(BridgeClient.handle(),
-                                                     Protocol.metadata(s.pose, ++sequence, s.width, s.height,s.capturedAt),
+                                                     metadata,
                                                      mapped))
                                 published++;
                             else
@@ -152,6 +157,9 @@ public final class FrameExporter implements AutoCloseable {
         if (current == null)
             return;
         try (var restore = new GLState()) {
+            current.guiGeneration=GuiIdentity.current();
+            current.guiWidth=MinecraftClient.getInstance().getWindow().getScaledWidth();
+            current.guiHeight=MinecraftClient.getInstance().getWindow().getScaledHeight();
             if (!BridgeClient.active()) {
                 current.pose = null;
                 current = null;

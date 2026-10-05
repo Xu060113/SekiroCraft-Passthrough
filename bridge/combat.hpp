@@ -8,6 +8,7 @@ struct alignas(8) ActorState {
     uint64_t id{}; sc::Vec3 position{}; int32_t hp{},maxHp{};
     uint32_t team{},flags{}; // 1 hostile, 2 NoDamage, 4 NoDeath, 8 NoPostureConsume
     int32_t posture{},maxPosture{},bossNode{}; // Engine remaining posture, not filled gauge.
+    uint64_t stage{};
 };
 struct alignas(8) CombatState {
     uint64_t sequence{},tick{},epoch{},hero{},ackCommand{};
@@ -17,7 +18,10 @@ struct alignas(8) CombatState {
     std::array<ActorState,actorSlots> actors{};
 };
 struct alignas(8) DamageCommand {
-    uint64_t sequence{},actor{}; float amount{}; uint32_t reserved{};
+    uint64_t sequence{},actor{}; float amount{}; uint32_t kind{}; // 0 melee, 1 arrow, 2 trident, 3 explosion, 4 mob, 5 magic
+    uint64_t stage{};
+    sc::Vec3 impact{},direction{};
+    uint32_t flags{},reserved{}; // 1: actual impact/direction supplied
 };
 struct alignas(8) CombatReport {
     uint64_t tick{},epoch{},hero{},session{};
@@ -25,7 +29,7 @@ struct alignas(8) CombatReport {
     uint32_t invulnerable{},reserved{};
     std::array<DamageCommand,damageSlots> commands{};
 };
-static_assert(sizeof(ActorState)==48 && sizeof(CombatState)==3160 && sizeof(CombatReport)==1600);
+static_assert(sizeof(ActorState)==56 && sizeof(CombatState)==3672 && sizeof(DamageCommand)==64 && sizeof(CombatReport)==4160);
 static_assert(offsetof(CombatState,actors)==88 && offsetof(CombatReport,commands)==64);
 inline bool validCombat(const CombatState &p) {
     if(!p.sequence || !p.epoch || p.count>actorSlots || p.flags&~7u || !std::isfinite(p.ackDamage) ||
@@ -35,7 +39,7 @@ inline bool validCombat(const CombatState &p) {
     if(!validPosture(p.posture,p.maxPosture))return false;
     for(size_t i=0;i<p.count;++i){const auto &a=p.actors[i];
         if(!a.id || !sc::finite(a.position) || sc::length(a.position)>150000 ||
-           a.maxHp<=0 || a.maxHp>10000000 || a.hp<0 || a.hp>a.maxHp || a.flags&~15u ||
+           a.maxHp<=0 || a.maxHp>10000000 || a.hp<0 || a.hp>a.maxHp || a.flags&~15u || !a.stage ||
            !validPosture(a.posture,a.maxPosture))return false;}
     return true;
 }
@@ -45,7 +49,9 @@ inline bool validCombat(const CombatReport &p) {
        p.damage>1000000 || p.heal>1000000)return false;
     for(auto i=p.command>damageSlots?p.command-damageSlots:0;i<p.command;++i){
         const auto &c=p.commands[i%damageSlots];
-        if(c.sequence!=i+1 || !c.actor || !std::isfinite(c.amount) || c.amount<=0 || c.amount>10000 || c.reserved)return false;}
+        if(c.sequence!=i+1 || !c.actor || !c.stage || !std::isfinite(c.amount) || c.amount<=0 || c.amount>10000 ||
+           c.kind>5 || c.flags&~1u || c.reserved || !sc::finite(c.impact) || !sc::finite(c.direction) ||
+           ((c.flags&1) && (sc::length(c.impact)>150000 || sc::length(c.direction)>1.01f)))return false;}
     return true;
 }
 // Damage is measured in vanilla MC health points (20 = one full native life).

@@ -3,6 +3,7 @@
 
 // Handles are owned by NativeBridge and used on Minecraft's render thread only.
 extern "C" {
+JNIEXPORT jint JNICALL Java_dev_sekirobridge_NativeBridge_abiVersion(JNIEnv*,jclass){return bridge::version;}
 JNIEXPORT jboolean JNICALL Java_dev_sekirobridge_NativeBridge_projectileRays(JNIEnv *env,jclass,jlong handle,jobject b) {
     if(!handle || !b || env->GetDirectBufferCapacity(b)<jlong(sizeof(bridge::ProjectileRays)))return false;
     auto ptr=env->GetDirectBufferAddress(b);if(!ptr)return false;

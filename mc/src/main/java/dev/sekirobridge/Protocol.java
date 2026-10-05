@@ -4,8 +4,8 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
 public final class Protocol {
-    public static final int CONTROL_BYTES = 200, META_BYTES = 96, MAX_WIDTH = 1920, MAX_HEIGHT = 1080;
-    public static final int SCENE = 1, FOCUS = 2, EDIT = 4, MENU = 8, NATIVE_DEAD = 32, NATIVE_ACTION = 64;
+    public static final int CONTROL_BYTES = 200, META_BYTES = 112, INPUT_BYTES=6208, INPUT_HEADER=64, INPUT_EVENT=48, MAX_WIDTH = 1920, MAX_HEIGHT = 1080;
+    public static final int SCENE = 1, FOCUS = 2, EDIT = 4, MENU = 8, NATIVE_DEAD = 32, NATIVE_ACTION = 64, NATIVE_UI=128;
     public record State(long sequence, long tickMs, long epoch, int flags, int capabilities, float px,
                         float py, float pz, float ex, float ey, float ez, float fx, float fy, float fz,
                         float fov, float aspect, float near, float far, float yOffset, float scale, int width,
@@ -86,6 +86,7 @@ public final class Protocol {
         b.putInt(width).putInt(height).putInt(7).putFloat(s.captureYaw);
         b.putFloat(s.ex).putFloat(s.ey).putFloat(s.ez).putFloat(s.fx).putFloat(s.fy).putFloat(s.fz);
         b.putFloat(s.fov).putFloat(s.aspect).putFloat(s.near).putFloat(s.far).putLong(s.tickMs);
+        b.putLong(0).putInt(0).putInt(0);
         return b.flip();
     }
 }

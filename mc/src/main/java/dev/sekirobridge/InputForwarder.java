@@ -10,8 +10,19 @@ import java.nio.ByteBuffer;
 public final class InputForwarder {
     public static boolean replaying;
     public static int replayMods=-1;
+    public static boolean guiTrace;
+    private static int tracedClicks;
+    private record GuiProbe(java.util.UUID player,int syncId,long after){}
+    private static GuiProbe pendingProbe;
+    static void traceGuiResult(){
+        var probe=pendingProbe;if(probe==null || NativeBridge.clockMs()<probe.after())return;
+        pendingProbe=null;var server=MinecraftClient.getInstance().getServer();if(server==null)return;
+        server.execute(()->{var p=server.getPlayerManager().getPlayer(probe.player());if(p!=null)
+            BridgeClient.LOG.info("GUI server after-click expectedSyncId={} syncId={} revision={} cursorCount={}",probe.syncId(),
+                p.currentScreenHandler.syncId,p.currentScreenHandler.getRevision(),p.currentScreenHandler.getCursorStack().getCount());});
+    }
     private final int[] pressed=new int[256];
-    private final ByteBuffer events=Protocol.direct(4136);
+    private final ByteBuffer events=Protocol.direct(Protocol.INPUT_BYTES);
     private final Target target;
     private int buttons;
     private long epoch,eventSequence,dx,dy,textSequence,pointerEventTick;
@@ -20,12 +31,16 @@ public final class InputForwarder {
     private long pointerGeometry;
     private float pointerX,pointerY;
     private boolean pointerValid;
+    private Object inputScreen;
+    private long inputGeometry;
     // The target keeps replay ordering independent from the GLFW window and lets
     // the same production replay code be exercised without launching either game.
     interface Target {
         boolean screenOpen();
         default Object screenIdentity(){return screenOpen()?this:null;}
         default long cursorGeometry(){return 0;}
+        default long guiGeneration(){return screenOpen()?1:0;}
+        default void cancelPointer(){}
         void cursor(float x,float y);
         void key(int key,int action,int mods);
         void button(int button,int action,int mods);
@@ -38,13 +53,27 @@ public final class InputForwarder {
         private MinecraftClient client(){return MinecraftClient.getInstance();}
         public boolean screenOpen(){return client().currentScreen!=null;}
         public Object screenIdentity(){return client().currentScreen;}
-        public long cursorGeometry(){var w=client().getWindow();return ((long)w.getWidth()<<32)|Integer.toUnsignedLong(w.getHeight());}
+        public long guiGeneration(){return GuiIdentity.current();}
+        public long cursorGeometry(){return GuiIdentity.current();}
+        public void cancelPointer(){var mouse=(InputInvoker)client().mouse;mouse.bridgeActiveButton(-1);mouse.bridgePressTime(0);
+            for(int b=0;b<3;b++)KeyBinding.setKeyPressed(InputUtil.Type.MOUSE.createFromCode(b),false);}
         public void cursor(float x,float y){var c=client();
             ((InputInvoker)c.mouse).bridgeCursor(c.getWindow().getHandle(),
-                Math.max(0,Math.min(1,x))*c.getWindow().getWidth(),Math.max(0,Math.min(1,y))*c.getWindow().getHeight());}
+                x*c.getWindow().getWidth(),y*c.getWindow().getHeight());}
         public void key(int key,int action,int mods){var c=client();
             ((KeyboardInvoker)c.keyboard).bridgeKey(c.getWindow().getHandle(),key,0,action,mods);}
         public void button(int button,int action,int mods){var c=client();
+            if(guiTrace && action==1 && c.currentScreen!=null && tracedClicks++<64){
+                double x=c.mouse.getX()*c.getWindow().getScaledWidth()/c.getWindow().getWidth();
+                double y=c.mouse.getY()*c.getWindow().getScaledHeight()/c.getWindow().getHeight();
+                var slot=c.currentScreen instanceof net.minecraft.client.gui.screen.ingame.HandledScreen<?>?
+                    ((dev.sekirobridge.mixin.HandledScreenAccess)c.currentScreen).bridgeSlotAt(x,y):null;
+                BridgeClient.LOG.info("GUI click generation={} screen={} size={}x{} point={},{} slot={} button={} mods={}",
+                    GuiIdentity.current(),c.currentScreen.getClass().getSimpleName(),c.getWindow().getScaledWidth(),
+                    c.getWindow().getScaledHeight(),x,y,slot==null?-1:slot.id,button,mods);
+                if(c.getServer()!=null && c.player!=null)
+                    pendingProbe=new GuiProbe(c.player.getUuid(),c.player.currentScreenHandler.syncId,NativeBridge.clockMs()+150);
+            }
             ((InputInvoker)c.mouse).bridgeButton(c.getWindow().getHandle(),button,action,mods);}
         public void scroll(double amount){var c=client();((InputInvoker)c.mouse).bridgeScroll(c.getWindow().getHandle(),0,amount);}
         public void motion(long x,long y){var c=client();
@@ -78,7 +107,7 @@ public final class InputForwarder {
             case 222 -> GLFW.GLFW_KEY_APOSTROPHE; default -> GLFW.GLFW_KEY_UNKNOWN;
         };
     }
-    private static boolean forwardedKey(int vk){return vk>=8 && vk<256 && !(vk>=118 && vk<=120) && !(vk>=160 && vk<=165);}
+    private static boolean forwardedKey(int vk){return vk>=8 && vk<256 && !(vk>=117 && vk<=120) && !(vk>=160 && vk<=165);}
     private void key(int vk,int action,int mods){
         if(!forwardedKey(vk))return;
         int key=glfwKey(vk);if(key==GLFW.GLFW_KEY_UNKNOWN)return;
@@ -94,7 +123,6 @@ public final class InputForwarder {
         target.button(code,action,mods);
     }
     private void cursor(float x,float y){
-        x=Math.max(0,Math.min(1,x));y=Math.max(0,Math.min(1,y));
         Object screen=target.screenIdentity();long geometry=target.cursorGeometry();
         // Mouse.onCursorPos invokes Screen.mouseDragged whenever activeButton is
         // held, even for zero movement. Replaying stationary snapshots or the same
@@ -112,10 +140,15 @@ public final class InputForwarder {
         long next=events.getLong(16),nx=events.getLong(24),ny=events.getLong(32);
         if(!initialized || epoch!=s.epoch()){
             release();initialized=true;epoch=s.epoch();eventSequence=next;dx=nx;dy=ny;textSequence=s.textSequence();pointerEventTick=0;}
-        boolean input=(s.flags()&Protocol.EDIT)!=0 && (s.flags()&Protocol.MENU)==0;
+        boolean input=(s.flags()&Protocol.EDIT)!=0 && (s.flags()&(Protocol.MENU|Protocol.NATIVE_UI))==0;
         boolean nativeAction=(s.flags()&Protocol.NATIVE_ACTION)!=0 && !target.screenOpen();
         if(nativeAction)input=false;
         try{replaying=true;
+            Object screen=target.screenIdentity();long geometry=target.cursorGeometry();
+            if(screen!=inputScreen || geometry!=inputGeometry){
+                target.cancelPointer();buttons=0;pointerValid=false;
+                inputScreen=screen;inputGeometry=geometry;
+            }
             if(!input)releaseHeld();
             else if(!inputEnabled){
                 // Restore held movement/modifier levels after focus or F8. Do not
@@ -127,14 +160,25 @@ public final class InputForwarder {
             long first=Math.max(eventSequence,next-128);
             if(next-eventSequence>128)releaseHeld();
             for(long i=first;i<next;++i){
-                int at=40+(int)(i%128)*32,kind=events.getInt(at),code=events.getInt(at+4),action=events.getInt(at+8);
+                int at=Protocol.INPUT_HEADER+(int)(i%128)*Protocol.INPUT_EVENT,kind=events.getInt(at),code=events.getInt(at+4),action=events.getInt(at+8);
                 int mods=events.getInt(at+12);replayMods=mods;
                 if(!input)continue;
+                long stamp=events.getLong(at+32),generation=events.getLong(at+40);
+                boolean pointerMatches=target.screenOpen() && generation!=0 && generation==target.guiGeneration() && Protocol.fresh(now,stamp);
                 if(kind==1){if(!target.screenOpen() && (code=='G' || code=='R'))continue;key(code,action,mods);}
-                else if(kind==2){pointerEventTick=tick;
-                    if(target.screenOpen())cursor(events.getFloat(at+16),events.getFloat(at+20));button(code,action,mods);}
-                else if(kind==3){pointerEventTick=tick;
-                    if(target.screenOpen())cursor(events.getFloat(at+16),events.getFloat(at+20));
+                else if(kind==2){pointerEventTick=Math.max(pointerEventTick,stamp);
+                    if(target.screenOpen()){
+                        float x=events.getFloat(at+16),y=events.getFloat(at+20);
+                        if(!pointerMatches){if(action==0)button(code,0,mods);continue;}
+                        // Outside the drawn overlay is outside every MC widget.
+                        if(action!=0 && (x<0 || x>1 || y<0 || y>1))continue;
+                        cursor(x,y);
+                    }button(code,action,mods);}
+                else if(kind==3){pointerEventTick=Math.max(pointerEventTick,stamp);
+                    if(target.screenOpen()){
+                        if(!pointerMatches)continue;
+                        float x=events.getFloat(at+16),y=events.getFloat(at+20);
+                        if(x<0 || x>1 || y<0 || y>1)continue;cursor(x,y);}
                     target.scroll(events.getInt(at+24)/120.0);}
             }
             eventSequence=next;replayMods=-1;
@@ -149,8 +193,9 @@ public final class InputForwarder {
             if(!target.screenOpen())
                 for(int vk=8;vk<256;++vk){int key=glfwKey(vk);
                     if(key!=GLFW.GLFW_KEY_UNKNOWN && forwardedKey(vk))target.level(key,pressed[vk]!=0);}
-            if(input && target.screenOpen() && s.tickMs()>=tick && s.tickMs()>pointerEventTick)
-                cursor(s.mouseX(),s.mouseY());
+            if(input && target.screenOpen() && events.getLong(48)==target.guiGeneration() &&
+                Protocol.fresh(now,events.getLong(56)) && events.getLong(56)>pointerEventTick)
+                cursor(events.getFloat(40),events.getFloat(44));
             if(!target.screenOpen())pointerValid=false;
             long mx=nx-dx,my=ny-dy;dx=nx;dy=ny;
             if(input && !target.screenOpen() && Math.abs(mx)<5000 && Math.abs(my)<5000)target.motion(mx,my);

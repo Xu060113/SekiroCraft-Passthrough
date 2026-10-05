@@ -18,6 +18,7 @@ inline std::atomic<bool> mcEdit{false};
 inline std::atomic<bool> flying{false};
 inline std::atomic<bool> mcOwner{false};
 inline std::atomic<bool> nativeKeys{false};
+inline std::atomic<bool> nativeUI{false};
 inline std::atomic<uint64_t> attackUntil{};
 inline std::atomic<uint64_t> grappleUntil{};
 inline std::array<std::atomic<bool>,4> bufferedAttack{};

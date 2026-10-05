@@ -2,7 +2,7 @@
   "required": true,
   "package": "dev.sekirobridge.mixin",
   "compatibilityLevel": "JAVA_17",
-  "client": ["CameraMixin", "GameRendererMixin", "WorldRendererMixin", "BackgroundRendererMixin", "InputInvoker", "KeyboardInvoker", "ClientMixin", "MouseMixin", "InputUtilMixin", "InGameHudMixin", "KeyboardMixin", "CollisionViewMixin", "TerrainMotionMixin", "TerrainTargetMixin", "SoundManagerMixin", "SoundSystemMixin", "NativeFootstepMixin", "CrumblingAlphaMixin", "DeathScreenMixin", "ProjectileTerrainMixin", "ThrownTerrainMixin", "NativeProjectileTargetMixin"],
+  "client": ["CameraMixin", "GameRendererMixin", "WorldRendererMixin", "BackgroundRendererMixin", "InputInvoker", "HandledScreenAccess", "KeyboardInvoker", "ClientMixin", "MouseMixin", "InputUtilMixin", "InGameHudMixin", "KeyboardMixin", "CollisionViewMixin", "TerrainMotionMixin", "TerrainTargetMixin", "SoundManagerMixin", "SoundSystemMixin", "NativeFootstepMixin", "CrumblingAlphaMixin", "DeathScreenMixin", "ProjectileTerrainMixin", "ThrownTerrainMixin", "NativeProjectileTargetMixin"],
   "mixins": ["NativeMobTargetMixin"],
   "injectors": { "defaultRequire": 1 }
 }

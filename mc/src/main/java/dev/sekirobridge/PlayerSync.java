@@ -18,7 +18,7 @@ final class PlayerSync {
     private boolean clientHandoff,serverHandoff;
     void client(Protocol.State s){
         var p=MinecraftClient.getInstance().player;if(p==null)return;
-        boolean handoff=(s.flags()&(Protocol.NATIVE_ACTION|Protocol.NATIVE_DEAD))!=0;
+        boolean handoff=(s.flags()&(Protocol.NATIVE_ACTION|Protocol.NATIVE_DEAD|Protocol.NATIVE_UI))!=0;
         boolean initial=clientIdentity!=p || clientEpoch!=s.epoch();
         if(!initial && !handoff && !clientHandoff)return;
         clientHandoff=handoff;
@@ -39,7 +39,7 @@ final class PlayerSync {
             p.setNoGravity(false);p.noClip=false;
             p.teleport(p.getServerWorld(),s.mcX(s.px()),s.mcY(s.py()),s.mcZ(s.pz()),s.yaw(),s.pitch());p.setVelocity(Vec3d.ZERO);
         }
-        boolean handoff=(s.flags()&(Protocol.NATIVE_ACTION|Protocol.NATIVE_DEAD))!=0;
+        boolean handoff=(s.flags()&(Protocol.NATIVE_ACTION|Protocol.NATIVE_DEAD|Protocol.NATIVE_UI))!=0;
         if(handoff || serverHandoff){
             p.teleport(p.getServerWorld(),s.mcX(s.px()),s.mcY(s.py()),s.mcZ(s.pz()),p.getYaw(),p.getPitch());
             p.setVelocity(Vec3d.ZERO);p.fallDistance=0;
