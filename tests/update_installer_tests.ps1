@@ -144,3 +144,11 @@ $f=GuiFixture 'unsupported-auto-boss';$before=(Get-FileHash "$($f.game)\sekirobr
 $failed=$false;try{& "$($f.dir)\scripts\update-installed.ps1" -MinecraftDirectory $f.mc -AutoBossPhases|Out-Null}catch{$failed=$true}
 Check ($failed -and (Get-FileHash "$($f.game)\sekirobridge.ini").Hash -eq $before) 'unsupported auto-stage package fails before mutations'
 Write-Output "$checks total paired-update and explicit HP-stage checks passed."
+$f=GuiFixture 'fresh-install-no-legacy-settings'
+Remove-Item -LiteralPath "$($f.game)\sekirocraft.ini","$($f.mc)\options.txt"
+& "$($f.dir)\scripts\update-installed.ps1" -MinecraftDirectory $f.mc -NativeGrappleKey M|Out-Null
+Check ((Get-Content "$($f.game)\dinput8.dll") -eq 'new host' -and (Get-Content "$($f.mc)\mods\sekiro-minecraft-passthrough-0.1.0.jar") -eq 'new MC') 'fresh install updates both peers without legacy settings or MC options'
+Check (!(Test-Path "$($f.game)\sekirocraft.ini") -and !(Test-Path "$($f.mc)\options.txt")) 'fresh update does not create unrelated settings'
+$report=Get-Content "$($f.dir)\runtime\combatfix1-verification.json" -Raw|ConvertFrom-Json
+Check ($null -eq $report.originalConfigHash -and $null -eq $report.mcOptionsHash) 'missing settings recorded as absent'
+Write-Output "$checks total paired-update, fresh-install and rollback checks passed."

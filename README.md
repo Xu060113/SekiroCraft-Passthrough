@@ -1,76 +1,187 @@
 # SekiroCraft-Passthrough
 
-独立的 **真实 Minecraft 1.20.1 + 只狼双进程桥接项目**，首版 0.1.0。原创 C++ 项目单独保留在相邻的 `SekiroCraft-Original` 仓库。本项目没有把 MC 重写成 C++。
+在《只狼：影逝二度》的场景里操作真正的 Minecraft 人物、方块、背包和生物的 Windows 实验性模组。
 
-当前补丁 **`gameplay4-gui-native-combat`，协议 v2**：MC 背包事件绑定到实际显示的界面与视口；加入只狼菜单输入切换；原生动作交接取消固定 6.5 秒等待，改读当前动画状态。伤害消息保留武器类型、命中位置和目标阶段。必须同时更新只狼 DLL 与含 JNI 的 MC JAR。**Boss 阶段结束、原生受击和动画交接仍需定向实机验收；远程自动削红点的候选调用默认关闭，最终奖励没有验收。** 见 [本轮测试](docs/GUI_NATIVE_COMBAT_TEST.md)。下文旧补丁说明保留开发背景，以本轮说明为准。
+本项目同时运行 **Minecraft 1.20.1 Fabric 与只狼**：Minecraft 负责人物操作和游戏逻辑，只狼提供场景、原生敌人和钩索；通过共享内存、JNI 与 D3D11 合成画面和同步状态。它不是把 Minecraft 反编译成 C++，也不是完整移植。原创 C++ 方块版本独立保留，本仓库只包含双进程桥接版本。
 
-当前已生成只狼端 `dinput8.dll` 和 MC Fabric 模组 JAR，并通过离线通信、JNI、D3D11 合成与注入点检查。首次 MC 实机启动发现天空渲染注入选中了静态重载，已修复为精确描述符，并新增回调签名及发行 JAR 映射检查。**尚不能称为完整移植。** 修复后的实际 MC 启动、帧导出、输入与只狼整合仍待验收。
+当前版本：`0.1.0`；补丁：`gameplay4-gui-native-combat`；通信协议：`v2`。这是持续开发的版本，离线检查通过不代表所有场景和 Boss 都已完成实机验收。
 
-后续修复了共享内存忙碌被误判为断线造成的闪屏、全屏暗角使透明 HUD 变黑，以及 F7/F8/F9 同时收到物理键与窗口消息时重复触发的问题。更新包含只狼 DLL 与 MC JAR，两款游戏正常退出后再安装；离线回归检查通过，实机效果继续验收。
+## 功能与边界
 
-当前补丁 `mc-owner2` 继续由 **MC → 只狼** 主导人物。MC 自己处理移动、跳跃、潜行、疾跑、飞行、动画、背包和物品操作。针对上一版实测问题，补齐 Windows 双击事件，避免旧按键快照重复或撤销背包点击；只狼相机使用已完成的 MC 图像，并与原生场景深度绑定。地面改用固定世界格、短暂缓存和浅穿透修正，增加瞄准原生地面放置第一块 MC 方块；参考 SkyCraft 区分未知地形与已知空地，采样未就绪时暂缓移动和坠落。**本补丁的运行效果仍需用户验收**。见 [功能验收](docs/FEATURE_TEST.md)。
+| 功能 | 当前行为 |
+| --- | --- |
+| MC 操作 | 移动、跳跃、疾跑、潜行、创造飞行、背包、合成、方块、红石、第一/第三人称由真实 MC 处理 |
+| 原生地面 | 采样附近地面，支持放置第一块方块、生物蛋以及附近 MC 实体的地面碰撞 |
+| 投射物 | MC 方块和实体命中保留；原生场景使用射线检测，敌人通过不可见 MC 代理接收命中 |
+| 战斗 | MC 近战、投射物、爆炸和敌对怪物可向附近原生敌人传递伤害；原生姿态和玩家 HP 参与同步 |
+| Boss 阶段 | 可选“血量耗尽自动扣一颗红点”的简化结算；不能保证特殊剧情阶段、忍杀演出及最终奖励正确 |
+| 玩家状态 | 生存血条按原生 HP 比例同步；创造/旁观模式使用原生无伤害位；饥饿、盔甲、吸收血和复活次数不等价同步 |
+| 钩索 | MC 模式按 M 请求原生钩索，钩索位移反馈给 MC；普通跑跳和鼠标仍由 MC 控制，狼模型隐藏 |
+| 音效 | 由后台 Minecraft 播放真实 MC 音效 |
+| 菜单 | F6 在 MC 与只狼菜单输入之间切换，背包点击按所显示画面的坐标转发 |
 
-`mc-owner2-renderfix1` 修正随后实测的“所有 MC 内容不可见”：无关延迟命令列表和下一帧深度录制不再否决当前合成；世界使用已执行场景的固定深度副本，HUD/背包单独绘制。这个热修复只需更新只狼 DLL，可继续使用已安装的 `mc-owner2` MC JAR；不改变两端协议。日志分别记录世界与 HUD 提交次数及世界未绘制的原因。
+完整原生受击、击退、弹反和武器参数适配仍在开发。附近只狼 NPC 的方块碰撞使用人形尺寸近似，巨大 Boss、寻路和脚本瞬移不保证正确；没有创建原生 Havok 方块刚体。原生 NPC 主动攻击 MC 怪物尚未实现。最新定向验收见 [HP 阶段与钩索测试](docs/HP_STAGE_TRAVERSAL_TEST.md)。
 
-## 工作方式
+## 环境要求
 
-`gameplay1-inventoryfix1` 修正背包点击重复进入拖动的问题：静止指针不再重复发送 onCursorPos，真实移动仍发送拖动；更换界面或改变窗口大小后强制刷新坐标。新增单击、按住静止、实际拖动、界面切换和窗口缩放回归，生产输入检查共 45 项。仅更新 MC JAR，沿用 gameplay1 的只狼 DLL/JNI；实机背包操作仍需验收。
+- Windows x64，支持 D3D11 的显卡；键盘和鼠标。手柄未验证。
+- 合法安装的只狼 1.06。**仅支持下面这个可执行文件指纹**，版本号相同也不代表兼容：
 
-当前 `gameplay1` 需要同时更新只狼 DLL 和 MC JAR。新增动态实体地面碰撞、后台音效、原生生物命中代理、MC → 只狼生命伤害、双向玩家血量和创造/旁观模式原生无伤害保护。代码与离线夹具通过，**没有启动游戏，新增功能仍待实机验收**。步骤与边界见 [本轮验收](docs/GAMEPLAY_TEST.md)。
+  ```text
+  637ACA527538C0EC6E1F136C8ED66046E95DFBDBB1F51926E134D9916398B856
+  ```
 
-只狼端读取原角色位置、相机与场景深度；MC 端运行真正的方块、背包、合成、红石、机器和生物逻辑。两个进程使用当前 Windows 会话中的命名共享内存交换状态和画面，通道默认 `default`，没有网络监听。
+- Minecraft Java Edition 1.20.1，Fabric Loader 0.16.10，Fabric API `0.92.2+1.20.1`。启动器和 Fabric 配置需自行准备。
+- 构建需要 Git、Windows x64 JDK 21 和 PowerShell（推荐 PowerShell 7）。Java 字节码目标为 17。
+- 首次构建需要联网下载依赖。脚本固定 llvm-mingw `20260922`、Gradle `8.8`、Fabric Loom `1.6.12`。
 
-MC 的天空、云、天气背景及雾在桥接激活期间关闭。世界 RGBA、深度和手部/HUD/菜单 RGBA 分层导出，使用三组 PBO 和零等待 GPU fence。MC 主导模式让只狼相机跟随已完成的图像，以同一视角做 D3D11 深度合成；显示延迟取决于两端帧率和读回速度。两端相机不匹配时跳过合成。渲染后恢复原有状态；不依赖 GTA ScriptHookV，也不要求安装 ReShade。
+Forge/OptiFine 配置不能直接加载本 Fabric 模组。Sodium、Iris、其他渲染模组及其他只狼 DLL 加载器的兼容性尚未验证，首次测试请用独立的原版 Fabric 实例。
 
-在 MC 专用单人世界执行 `/sekirobridge on` 后，默认第一人称。切到只狼窗口，**WASD 移动、Space 跳跃、Shift 潜行、Ctrl 疾跑、E 背包、Q 丢弃、F 换手、F5 视角、1–9/滚轮选物品、左键挖掘/攻击、右键使用/放置**。采用 MC 当前键位设置；只狼的键鼠操作被隔离。F6 切换只狼菜单输入与 MC 控制；MC 没有打开界面时 Esc 进入只狼菜单。F7 为桥接诊断，F8 暂停/恢复 MC 控制，F9 生成起始草方块；它们保留给桥接。只狼菜单关闭后按 F6 返回 MC。
+## 下载与构建
 
-创造模式按照 MC 原逻辑**双击 Space 飞行**，Space 上升、Shift 下降。MC 只在连接初始化时从只狼取得出生坐标，随后正常移动由其客户端和单人服务器计算。未知地形会短暂清零速度并等待采样；已知空地不会生成保护地板。原生位置钩子接收计算结果，借用并恢复原玩家重力/移动位。
-
-相机适配在已定位的 1.06 ChrCam 更新尾部执行，检查当前相机身份，只更新本次相机矩阵和镜头。它跟随 MC 相机，而不是反过来覆盖 MC。抬头到垂直方向仍保留水平朝向。断开后原更新路径重新接管。所有原生接口都检查本机 exe 指纹和对应机器码；未匹配时不启用控制。
-
-MC 的视野设置、疾跑及望远镜缩放继续计算，实际世界视野随帧传递。桥接期间暂时关闭走路摇晃和受伤镜头倾斜，避免这些额外变换与两端相机元数据不一致。
-
-鼠标点击以 128 项事件环传递完整按下/松开、双击和各自位置，使用实际客户区及画面边界换算。按钮动作只从有序事件产生，较新的按键快照仅用于修复漏掉的松开。MC 自身后台窗口事件不会覆盖桥接事件，Shift 点击保留事件发生时的修饰键。相对鼠标量在隔离 DirectInput 前读取，交由 MC 原版鼠标灵敏度、反转和视角逻辑处理。
-
-拿着方块瞄准已采样的只狼地面，右键可放置第一块；后续邻面放置由 MC 原版负责。原生地面只提供放置顶面，不可挖掘。非整数高度选择上方第一个完整 MC 格，因此可能存在不到一格的离地间隙。
-
-## 当前边界
-
-- 原生射线每 50ms 采样 81 格，轮换中心和八个外圈区域，覆盖人物周围约 6 米。中心每 100ms 刷新，外圈每 800ms 刷新。玩家、生物、点燃的 TNT、掉落物和下落方块共用临时地面碰撞，仅当前单人维度生效，不写屏障进存档。已知格保留最多 1500ms，射线未命中立即清除；未知格让玩家等待，附近其它实体最多等待 500ms，TNT 引信继续计时。仍是地面高度近似，没有完整墙顶、悬檐及多层地形，远处实体不保证原生地面碰撞。
-- MC 方块碰撞由 MC 原引擎处理。附近只狼 NPC 的最终位置会经过 MC 真实方块形状的扫掠约束，可在局部区域挡住走动并站在方块上；采样范围为 MC 玩家周围水平约 6 格、下方 4 格和上方 8 格，最多 4096 个形状，未知区/溢出/过期即停用。NPC 身体暂按与 MC 玩家相同的 0.6×1.8 格估计，巨大 Boss、初始已重叠实体和原生脚本瞬移不保证碰撞。**没有在 Havok 中创建 MC 刚体**，钩锁、原生弹道和寻路导航网格仍未接入。
-- 第一人称/第三人称相机适配已写入并通过离线矩阵与垂直视角合成检查；游戏内相机时序和快速运动仍需验收，不能把离线通过当成已经消除全部重影。
-- 最多 64 个附近原生生物提供不可见 MC 命中代理；近战、投射物、爆炸和怪物伤害传回原生 HP。20 点 MC 伤害相当于该目标的一条满血和一条姿态损耗，暂为比例近似，不按原生 AtkParam 计算。姿态通过已核对本机 1.06 机器码的 ChrData setter 更新，原生恢复/NoPostureConsume 保留；HUD 显示原生玩家及准星指向代理的姿态。敌对 MC 怪物可追打原生敌人，普通动物保持原版行为。Boss 的 NoDeath 和阶段计数保留，**姿态归零并不等于已触发忍杀**；完整受击动作、击退、弹反、奖励和忍杀入口仍缺失。原生 NPC 攻击 MC 怪物及完整原生墙面视线遮挡尚未实现。
-- 生存玩家红色血条按原生 HP/maxHP 映射到 MC 最大生命值；MC 受伤/回血发送累积增量，原生受伤/回血反馈到 MC。创造/旁观模式仅借用当前原生玩家的 NoDamage 位，关闭/断连/切模式时恢复原值。吸收血、饥饿、盔甲、姿态和复活次数不做等价同步。
-- MC 原版音效由后台 MC 的 OpenAL 播放。桥接连接时主音量若为 0，临时输出 70%，不改 options.txt；关闭桥接恢复。主动改音量立即优先。原生地面脚步使用石头音效。
-- 尚无地图、存档槽或覆盖所有脚本界面的自动菜单识别，亦未验证第三方 MC 渲染模组或手柄。F6 可显式切换输入，F8 暂停 MC 控制；彻底停止桥接请在 MC 执行 `/sekirobridge off`。首轮使用独立创造虚空世界。
-- 只支持本机已校验 SHA256 的只狼 1.06；MC 固定 1.20.1、Fabric Loader 0.16.10、Fabric API 0.92.2。现有 Forge/OptiFine 实例不能直接加载这个 Fabric 模组。
-- 保存由真实 MC 单人世界负责，不导入、修改或转换原创项目的 SCW 存档。`y_offset` 必须使本场景映射到 MC 的 -64…319 高度范围；切换地图需要单独校准，不自动搬动已有方块。
-
-## 构建
-
-### 死亡、钩爪、忍杀和投射物修复
-
-`gameplay3-life-actions-projectiles` 保留 MC 死亡界面点击，并在只狼真正复活后自动复活 MC、丢弃旧生命的伤害数据。`sekirobridge.ini` 的 `grapple_key` 与只狼实际钩爪键位对应（字母 A–Z）；MC 模式只按 **M** 发出钩爪请求，G 不参与原生动作；WASD、跑步、跳跃和鼠标继续由 MC 处理。用户当前使用 **M**，安装时使用 `-NativeGrappleKey M`。**R** 发送只狼默认左键攻击／红点忍杀／复活输入。原生动作结束返回已观察的地面待机状态即可归还 MC 移动，不再要求返回 MC 控制时的动画 0；原生 Boss 忍杀仍需要实测验收。交接期间仍隐藏狼模型，不适配史蒂夫忍杀动作。
-
-赤鬼修复候选改用实机记录的正常地面刀击参数 5000010，补齐反应选择器，并取消 MC 位置同步对原生 NoMove 的占用。离线夹具不能证明赤鬼已出现红点，定向验证见 [OGRE_GRAPPLE_TEST.md](docs/OGRE_GRAPPLE_TEST.md)。
-
-箭／三叉戟、投掷物与火球通过异步原生射线检测地面、墙面，并保留原版方块与实体的最近命中顺序。敌人代理绘制身上的箭。Boss 的细部命中体仍使用人形近似。离线检查与实机验收是分开的，步骤与限制见 [专项验收说明](docs/LIFE_ACTION_PROJECTILE_TEST.md)。
-
-本机 Windows x64、JDK 21，Java 字节码目标 17。便携 C++ 编译器固定 llvm-mingw 20260922，Gradle 固定 8.8，Fabric Loom 固定 1.6.12。工具和依赖可在两个项目间共享缓存，Git 元数据、代码、存档和构建结果相互独立。
+在 PowerShell 中执行：
 
 ```powershell
+git clone https://github.com/Xu060113/SekiroCraft-Passthrough.git
+Set-Location .\SekiroCraft-Passthrough
+
+# 改为自己安装的 Windows x64 JDK 21 目录；不要填写 bin 目录。
+$env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
+$env:Path = "$env:JAVA_HOME\bin;$env:Path"
+
 & .\scripts\bootstrap.ps1
 & .\scripts\build-passthrough.ps1
-# 已缓存依赖时：
-& .\scripts\build-passthrough.ps1 -Offline
 ```
 
-构建脚本仅编译和运行离线夹具，不调用 `runClient`，不启动只狼或 Minecraft。Minecraft 开发依赖下载到忽略的 `.cache`，不进入源码包或模组发行包。发行包包含 Fabric API 的 Apache 2.0 依赖。
+已有完整依赖缓存时可以用 `& .\scripts\build-passthrough.ps1 -Offline`。`bootstrap.ps1` 准备工具链和第三方源码，构建脚本编译两端并运行离线检查，均不会启动游戏。不要用 `-SkipTests` 生成用于安装的验证包。
 
-产物：`dist/SekiroCraft-Passthrough-0.1.0.zip`；验证记录：`build/verification.json`。未来部署前请读 [回来后的验收步骤](docs/RETURN_TEST.md)。
+构建结果：
 
-## 与参考项目的关系
+| 路径 | 内容 |
+| --- | --- |
+| `dist/SekiroCraft-Passthrough/dinput8.dll` | 只狼端模组 |
+| `dist/SekiroCraft-Passthrough/minecraft/` | MC 模组 JAR（含 JNI）和 Fabric API |
+| `dist/SekiroCraft-Passthrough-0.1.0.zip` | 本地打包结果 |
+| `build/verification.json` | 构建检查结果、协议和文件 SHA256 |
 
-结合 [universal-modder 的 Minecraft/GTA5 passthrough 示例](https://github.com/rehan-remade/universal-modder/tree/main/examples/minecraft-gta5-passthrough) 的分层传输与 [SkyCraft](https://github.com/chasmlol/SkyCraft) 的 MC 物理/碰撞就绪管理。通信使用 Win32 共享内存及自有 JNI，合成使用本项目 D3D11 hook。代码独立适配 MC 1.20.1 和只狼，未复制参考项目源文件，也不分发游戏资源。**SkyCraft 式的 MC 网格原生渲染、完整原生碰撞尚未移植**；具体采用的部分和边界见 [参考实现对照](docs/REFERENCE_DESIGN.md)。
+GitHub 仓库提供源码，不包含游戏文件或预编译发行包。以下安装和更新步骤以**保留完整构建目录**为前提；更新器还需要 `build/verification.json`，不能只复制 ZIP 内的脚本单独执行。
 
-本次 HP 自动阶段、M 专用钩索与生物蛋修复见 [定向验收](docs/HP_STAGE_TRAVERSAL_TEST.md)。自动扣红点是简化结算，特殊剧情阶段和最终奖励仍待实机验收。
+## 首次部署
+
+先备份只狼存档和 MC 世界，正常退出两款游戏。关闭仍在运行的 Java/Gradle 进程后再执行更新器。
+
+1. 在启动器中建立专用的 `1.20.1 + Fabric 0.16.10` 配置，设置独立的**游戏目录**。它必须与下面 `$mcDir` 一致，不一定是启动器所在目录。
+2. 在只狼设置中把钩索绑定为 M。
+3. 在刚刚克隆并构建的仓库根目录运行以下命令，替换两条路径：
+
+   ```powershell
+   $sekiroDir = 'C:\Games\Sekiro'
+   $mcDir = 'C:\Games\Minecraft\SekiroCraft'
+
+   # 检查指纹，应与环境要求里的 SHA256 相同。
+   Get-FileHash -LiteralPath (Join-Path $sekiroDir 'sekiro.exe') -Algorithm SHA256
+
+   & .\scripts\switch-sekiro.ps1 -Action Install -GameDirectory $sekiroDir
+   & .\scripts\prepare-minecraft.ps1 -GameDirectory $mcDir
+
+   # 启用 M 钩索与简化 Boss 自动扣红点，同时校验两端版本。
+   & .\scripts\update-installed.ps1 -MinecraftDirectory $mcDir -NativeGrappleKey M -AutoBossPhases
+   ```
+
+`switch-sekiro.ps1` 检查游戏指纹、备份可识别的旧 DLL，并保存安装记录；遇到未知 `dinput8.dll` 会拒绝覆盖。`prepare-minecraft.ps1` 只复制模组，**不会安装启动器或 Fabric Loader**。更新器备份并校验 DLL/JAR，第二端写入失败时回滚；可能保存的只狼存档备份不代替用户自己的备份。
+
+不需要自动 Boss 阶段时，最后一条命令去掉 `-AutoBossPhases`。更新器每次根据本次参数设置该开关，后续更新要保留此参数才能继续启用。`-Diagnostic` 是定向排查选项，会开启记录及原生命中后端，日常运行无须开启。
+
+**请保留原安装仓库及其 `runtime/installation.json`、备份目录和目录位置。** 记录含本地绝对路径，更换克隆目录、删除 `runtime` 或移动仓库可能影响更新和恢复。
+
+### PowerShell 阻止执行时
+
+可以为单次命令设置执行策略，无需修改整个系统。示例（路径自行替换）：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File 'C:\Mods\SekiroCraft-Passthrough\scripts\switch-sekiro.ps1' -Action Install -GameDirectory 'C:\Games\Sekiro'
+```
+
+若提示 `Passthrough is installed. Restore it before replacing or updating the build.`，表示该目录已记录安装，**不要再次 Install**。同一仓库的常规更新使用下面的更新流程。
+
+## 启动与操作
+
+1. 启动只狼并进入可移动的游戏场景。
+2. 启动专用 Fabric 配置，建立独立的**单人创造虚空世界**用于首轮测试；保持 MC 进程运行。
+3. 在 MC 聊天框执行 `/sekirobridge on`。连接初始化从狼的位置取得出生坐标，默认第一人称。
+4. 切换到只狼窗口，使用 MC 操作。若正在只狼菜单输入模式，按 F6 返回 MC 控制。
+5. 用 `/sekirobridge status` 检查连接；停止桥接执行 `/sekirobridge off`。
+
+两端默认共享内存通道均为 `default`；使用同一 Windows 登录会话运行，两端设置必须一致。通信不需要开放网络端口。
+
+| 按键 | 功能 |
+| --- | --- |
+| WASD / Space / Shift / Ctrl | MC 移动 / 跳跃 / 潜行 / 疾跑（以 MC 当前键位为准） |
+| 双击 Space | 创造模式飞行；Space 上升，Shift 下降 |
+| E / Q / F / F5 | 背包 / 丢弃 / 换手 / 切换第一、第三人称 |
+| 1–9 / 滚轮 | 选择快捷栏 |
+| 左键 / 右键 | 挖掘或攻击 / 使用物品或放置 |
+| M | 请求原生钩索；`grapple_key` 应匹配只狼实际钩索键，本指南使用 M |
+| R | 转发原生攻击、红点忍杀或复活输入，能否生效取决于原生状态 |
+| F6 | 切换只狼菜单输入与 MC 控制 |
+| Esc | 关闭 MC 当前界面；MC 无界面时进入只狼菜单输入 |
+| F7 / F8 / F9 | 桥接诊断 / 暂停或恢复 MC 控制 / 生成测试草方块 |
+
+F6–F9、M、R 用于桥接，请避免绑定相冲突的 MC 操作。**G 不转发原生跑跳，M 只请求钩索**；M 也不会接管普通跑跳。打开只狼菜单后按 F6 将输入交给只狼，操作完毕再按 F6 返回 MC。
+
+拿着方块或生物蛋瞄准已采样的只狼地面，右键放置；后续邻面放置使用 MC 原版规则。原生地面不可挖掘，非整数地面可能与第一块方块之间留下不到一格的间隙。测试怪物攻击时使用非和平难度，选择僵尸/骷髅等敌对生物；普通动物保持原版行为。
+
+## 更新与卸载
+
+### 已安装后的更新
+
+正常退出两款游戏，在**原安装仓库**运行：
+
+```powershell
+git pull --ff-only
+& .\scripts\build-passthrough.ps1
+& .\scripts\update-installed.ps1 -MinecraftDirectory 'C:\Games\Minecraft\SekiroCraft' -NativeGrappleKey M -AutoBossPhases
+```
+
+DLL 与含 JNI 的 MC JAR 必须成对更新。不要手动混用不同提交的产物，也不要对已安装实例重复执行首次安装命令。更新器会检查安装记录和文件哈希；文件被手动修改时先核对原因，不要通过删除记录强行绕过。
+
+### 停用与恢复
+
+临时停用：在 MC 执行 `/sekirobridge off`。恢复只狼原 DLL：正常退出两款游戏后，在原仓库根目录执行：
+
+```powershell
+& .\scripts\switch-sekiro.ps1 -Action Restore -GameDirectory 'C:\Games\Sekiro'
+```
+
+恢复脚本只处理它记录拥有的只狼 DLL 和桥接配置，MC 模组不会自动删除。完全停用 MC 端时，在关闭 MC 后移除专用实例 `mods` 中的 `sekiro-minecraft-passthrough-0.1.0.jar`；Fabric API 是否保留取决于其他模组。保留备份和世界，不要通过删除整个游戏目录卸载。
+
+## 注意事项与排查
+
+- **地形是局部近似。** 地面采样覆盖玩家附近约 6 米，缓存约 1.5 秒；没有完整墙顶、洞穴或多层地形碰撞。高速移动、巨大敌人及采样范围外实体可能穿透或失去支撑。
+- **Boss 自动扣红点是可选的实验功能。** 它在血量耗尽时尝试推进原生阶段；特殊脚本门槛、忍杀演出、最终奖励仍需逐个验证，不能把它当成完整原生战斗适配。
+- **钩索与相机交接仍需实机验收。** 当前读取原生动作状态、仅在确认钩索时跟随位移，不套用固定等待时间；史蒂夫没有只狼忍杀/钩索动作动画。
+- **存档与地图独立。** MC 方块由真实单人世界保存，不转换原创版本 SCW 存档。尚无地图或存档槽自动绑定，切换地图应单独校准。
+- **高度范围。** `sekirobridge.ini` 的 `y_offset` 默认为 128，需把场景映射到 MC 的 -64…319。修改偏移不会自动搬动已放置的方块。
+- **画面不可见/闪烁。** 用 F7 查看连接与提交状态，确认两端协议匹配、MC 在单人世界且桥接已开启。先在无其他渲染模组的 Fabric 实例复现，保留日志后正常退出。
+- **背包或只狼菜单点击无效。** 先用 F6 确认输入归属；检查是否误按 F8 暂停 MC 输入。报告当时界面、分辨率、缩放、操作步骤，避免仅描述“点不到”。
+- **无 MC 音效。** 检查 Windows 音量混合器中的 Java/Minecraft 和 MC 声音设置；声音来自后台 MC，不由只狼端播放。
+- **更新报游戏仍在运行。** 正常退出后检查 `sekiro`、`java`、`javaw`；更新器也会拒绝仍运行的 Gradle JVM，关闭相应进程后再试。
+- **不支持的只狼指纹。** 安装器会拒绝，不能仅修改哈希绕过；需要重新适配地址和机器码才能支持其他构建。
+
+问题反馈请附游戏指纹、仓库提交号、F7 状态、最短复现步骤，以及脱敏后的相关日志。不要上传游戏可执行文件、游戏资源、存档、账号凭据或完整本机个人路径。
+
+## 开发资料与来源
+
+| 文档 | 内容 |
+| --- | --- |
+| [PROTOCOL.md](docs/PROTOCOL.md) | 两端协议与共享内存 |
+| [REFERENCE_DESIGN.md](docs/REFERENCE_DESIGN.md) | 参考项目思路与本实现的差异 |
+| [GUI_NATIVE_COMBAT_TEST.md](docs/GUI_NATIVE_COMBAT_TEST.md) | 背包、原生菜单、战斗交接验收 |
+| [HP_STAGE_TRAVERSAL_TEST.md](docs/HP_STAGE_TRAVERSAL_TEST.md) | 自动 Boss 阶段、M 钩索与生物蛋验收 |
+| [LIFE_ACTION_PROJECTILE_TEST.md](docs/LIFE_ACTION_PROJECTILE_TEST.md) | 死亡、复活、原生动作与投射物 |
+
+`docs` 中的历史测试说明用于记录迭代过程；当前安装步骤和按键以本 README 为准。
+
+思路参考 [universal-modder 的 Minecraft/GTA5 passthrough 示例](https://github.com/rehan-remade/universal-modder/tree/main/examples/minecraft-gta5-passthrough) 的两端传输与画面分层，以及 [SkyCraft](https://github.com/chasmlol/SkyCraft) 的 MC 物理和地形就绪管理。本项目独立使用 Win32 共享内存、自有 JNI 和 D3D11 hook 适配只狼，没有复制这两个项目的源文件，也没有实现 SkyCraft 的完整原生网格渲染和碰撞系统。
+
+第三方组件与许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 和 [licenses](licenses)。本仓库目前未声明整体开源许可证；公开可见不代表授予任意使用或再分发许可。Minecraft 与只狼的代码、资源和商标属于各自权利人，仓库不分发游戏内容。

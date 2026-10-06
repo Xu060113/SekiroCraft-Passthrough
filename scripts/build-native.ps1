@@ -1,5 +1,7 @@
-param([string]$CompilerRoot,[string]$DependencyRoot,[string]$JdkRoot='C:\Program Files\Java\jdk-21',[switch]$SkipTests)
+param([string]$CompilerRoot,[string]$DependencyRoot,[string]$JdkRoot,[switch]$SkipTests)
 $ErrorActionPreference='Stop'
+if(!$JdkRoot){$JdkRoot=$env:JAVA_HOME}
+if(!$JdkRoot){$JdkRoot='C:\Program Files\Java\jdk-21'}
 $projectRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $workspaceRoot=[IO.Path]::GetFullPath((Join-Path $projectRoot '..\..'))
 if(!$CompilerRoot){$CompilerRoot=Join-Path $projectRoot '.tools\llvm-mingw-20260922-ucrt-x86_64\bin';if(!(Test-Path -LiteralPath $CompilerRoot)){$CompilerRoot=Join-Path $workspaceRoot '.tools\llvm-mingw-20260922-ucrt-x86_64\bin'}}

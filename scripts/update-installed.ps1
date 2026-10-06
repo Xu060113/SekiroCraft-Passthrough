@@ -65,8 +65,12 @@ if(($guiPatch -or $manifest.patch -eq 'gameplay3-life-actions-projectiles') -and
 }
 $settingsPath=Join-Path $gameRoot 'sekirocraft.ini'
 $optionsPath=Join-Path $mcRoot 'options.txt'
-$settingsHash=(Get-FileHash -LiteralPath $settingsPath).Hash
-$optionsHash=(Get-FileHash -LiteralPath $optionsPath).Hash
+function Get-OptionalSettingsHash([string]$Path){
+    if(Test-Path -LiteralPath $Path){return (Get-FileHash -LiteralPath $Path).Hash}
+    return $null
+}
+$settingsHash=Get-OptionalSettingsHash $settingsPath
+$optionsHash=Get-OptionalSettingsHash $optionsPath
 $suffix=[Guid]::NewGuid().ToString('N')
 $dllTemp=Join-Path $gameRoot ("bridge-update-$suffix.tmp")
 $jarTemp=Join-Path $mcRoot ("mods\bridge-update-$suffix.tmp")
@@ -105,7 +109,7 @@ try {
     Move-Item -LiteralPath $dllTemp -Destination $dllTarget -Force
     Move-Item -LiteralPath $jarTemp -Destination $jarTarget -Force
     if((Get-FileHash -LiteralPath $dllTarget).Hash -ne $dllHash -or (Get-FileHash -LiteralPath $jarTarget).Hash -ne $jarHash){throw 'Installed checksum mismatch.'}
-    if((Get-FileHash -LiteralPath $settingsPath).Hash -ne $settingsHash -or (Get-FileHash -LiteralPath $optionsPath).Hash -ne $optionsHash){throw 'Settings changed during update.'}
+    if((Get-OptionalSettingsHash $settingsPath) -ne $settingsHash -or (Get-OptionalSettingsHash $optionsPath) -ne $optionsHash){throw 'Settings changed during update.'}
     ($record.files | Where-Object name -EQ 'dinput8.dll').sha256=$dllHash
     ($record.files | Where-Object name -EQ 'sekirobridge.ini').sha256=(Get-FileHash -LiteralPath $configTarget).Hash
     $record.installedAt=(Get-Date).ToString('o')
