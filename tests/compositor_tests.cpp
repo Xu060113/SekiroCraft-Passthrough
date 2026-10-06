@@ -1,6 +1,7 @@
 #include "../src/compositor.hpp"
 #include "../bridge/session.hpp"
 #include "../src/deferred_scene.hpp"
+#include "../bridge/camera_frames.hpp"
 #include <iostream>
 #include <fstream>
 #include <thread>
@@ -31,6 +32,27 @@ int main() {
             "real D3D11 WARP device");
     bridge::Compositor renderer;
     require(renderer.init(device.Get()), renderer.error.c_str());
+    require(bridge::opaqueScenePass(c.Get()),"default opaque depth state may nominate native geometry");
+    D3D11_DEPTH_STENCIL_DESC opaqueDesc{};opaqueDesc.DepthEnable=TRUE;opaqueDesc.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ALL;opaqueDesc.DepthFunc=D3D11_COMPARISON_LESS;
+    ComPtr<ID3D11DepthStencilState> opaqueState,particleState;
+    require(SUCCEEDED(device->CreateDepthStencilState(&opaqueDesc,&opaqueState)),"create real opaque depth state");
+    opaqueDesc.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ZERO;
+    require(SUCCEEDED(device->CreateDepthStencilState(&opaqueDesc,&particleState)),"create real particle depth state");
+    c->OMSetDepthStencilState(particleState.Get(),0);
+    require(!bridge::opaqueScenePass(c.Get()),"depth-reading attack trails cannot replace the opaque scene camera");
+    c->OMSetDepthStencilState(opaqueState.Get(),0);
+    D3D11_BLEND_DESC effects{};effects.RenderTarget[0].BlendEnable=TRUE;effects.RenderTarget[0].SrcBlend=D3D11_BLEND_SRC_ALPHA;
+    effects.RenderTarget[0].DestBlend=D3D11_BLEND_INV_SRC_ALPHA;effects.RenderTarget[0].BlendOp=D3D11_BLEND_OP_ADD;
+    effects.RenderTarget[0].SrcBlendAlpha=D3D11_BLEND_ONE;effects.RenderTarget[0].DestBlendAlpha=D3D11_BLEND_ZERO;
+    effects.RenderTarget[0].BlendOpAlpha=D3D11_BLEND_OP_ADD;effects.RenderTarget[0].RenderTargetWriteMask=D3D11_COLOR_WRITE_ENABLE_ALL;
+    ComPtr<ID3D11BlendState> effectsState;
+    require(SUCCEEDED(device->CreateBlendState(&effects,&effectsState)),"create real translucent attack FX blend state");
+    c->OMSetBlendState(effectsState.Get(),nullptr,~0u);
+    require(!bridge::opaqueScenePass(c.Get()),"blended attack FX cannot nominate a replacement occlusion depth even when writing depth");
+    c->OMSetBlendState(nullptr,nullptr,~0u);c->OMSetDepthStencilState(nullptr,0);
+    require(bridge::opaqueScenePass(c.Get()),"opaque scene classification resumes after attack FX");
+    bridge::SceneDraw invalidCandidate;invalidCandidate.score=10000000;
+    require(!bridge::validSceneCandidate(invalidCandidate),"unpaired high-count draws cannot evict a valid MC world snapshot");
     D3D11_TEXTURE2D_DESC d{};
     d.Width = d.Height = 32;
     d.ArraySize = d.MipLevels = d.SampleDesc.Count = 1;
@@ -68,6 +90,52 @@ int main() {
         f.pixels[i * 4] = 255;
         f.pixels[i * 4 + 3] = 255;
         std::memcpy(f.pixels.data() + plane + i * 4, &mcDepth, 4);
+    }
+    {
+        bridge::NativeSceneReadiness readiness;
+        bridge::CameraFrames cameras;
+        bridge::SceneDraw startup{dsv,{0,0,32,32,0,1},camera,{},120};
+        require(!readiness.ready(true,true,false,1),"cold start waits for native geometry");
+        require(!cameras.select(99,1000),"cold start has no MC image or applied camera");
+        // Run the first unpaired scene through the real deferred metadata path.
+        bridge::SceneRecording recording;recording.record(1,startup);
+        ComPtr<ID3D11DeviceContext> bootContext;
+        require(SUCCEEDED(device->CreateDeferredContext(0,&bootContext)),"create cold-start native recording context");
+        ComPtr<ID3D11CommandList> bootList;
+        require(SUCCEEDED(bootContext->FinishCommandList(FALSE,&bootList)) &&
+                bridge::DeferredScene::attach(bootList.Get(),1,std::move(recording.draws)),"finish first native scene without an MC image");
+        c->ExecuteCommandList(bootList.Get(),TRUE);
+        auto metadata=bridge::DeferredScene::read(bootList.Get());
+        for(const auto &draw:metadata->draws)readiness.observe(draw,1);
+        require(readiness.ready(true,true,false,1),"executed unpaired native scene starts the bridge");
+        require(!bridge::validSceneCandidate(startup),"bootstrap geometry cannot be used as a paired render snapshot");
+        bridge::SceneDraw clear;clear.depth=dsv;clear.clearsDepth=true;
+        readiness.observe(clear,1);
+        require(readiness.ready(true,true,false,2),"native clear does not deadlock first MC frame export");
+        auto malformed=startup;malformed.camera.valid=false;
+        readiness.observe(malformed,4);
+        require(!readiness.ready(true,true,false,4),"invalid camera cannot keep a stale native scene alive");
+        readiness.observe(startup,4);
+        require(!readiness.ready(false,true,false,4) && !readiness.ready(true,false,false,4),"menu or unloaded player does not start the bridge");
+        require(readiness.ready(true,true,true,10),"native death UI retains the previously observed scene");
+        require(!readiness.ready(true,true,false,3),"backward frame index cannot reuse scene readiness");
+        bridge::Control control;control.sequence=1;control.epoch=99;control.tickMs=1000;
+        control.flags=readiness.ready(true,true,false,4)?bridge::Scene|bridge::Focus:0;
+        control.forward[2]=1;
+        require(bridge::valid(control) && (control.flags&bridge::Scene),"initial native control permits the peer to produce its first frame");
+        auto first=std::make_shared<bridge::Frame>(f);
+        first->meta.tickMs=first->meta.controlTickMs=1000;
+        cameras.receive(first);auto selected=cameras.select(99,1000);
+        require(selected==first,"first completed MC image enters the native camera after bootstrap");
+        cameras.applied(selected);std::shared_ptr<bridge::Frame> displayed;cameras.takeDisplayed(displayed);
+        startup.frame=displayed;
+        require(bridge::validSceneCandidate(startup) && bridge::Compositor::matchesCamera(displayed->meta,startup.camera),"bootstrap transitions to the strict paired world path");
+        auto mismatch=startup;mismatch.camera.eye.x+=1;
+        require(!bridge::Compositor::matchesCamera(mismatch.frame->meta,mismatch.camera),"startup fix does not allow mismatched frames to composite");
+        readiness.reset();
+        require(!readiness.ready(true,true,true,5),"resize clears readiness even during native death");
+        startup.frame.reset();readiness.observe(startup,5);
+        require(readiness.ready(true,true,false,5),"resize can bootstrap again without an existing MC image");
     }
     require(renderer.upload(c.Get(), f), "upload real MC frame planes");
     auto read = [&](UINT x = 16, UINT y = 16) {
@@ -352,5 +420,25 @@ int main() {
     renderFixedDepth(false);
     fixedDepth.reset();
     require(!fixedDepth.view(), "resize releases the owned depth snapshot view");
+    camera={sc::identity(),sc::perspective(1.1f,1,.05f,100),{0,0,0},{0,0,1},true};
+    float farScene=camera.projection.at(2,2)+camera.projection.at(3,2)/5;
+    float nearEffect=camera.projection.at(2,2)+camera.projection.at(3,2)/2;
+    bridge::SceneRecording effectRecording;
+    auto effectFrame=std::make_shared<bridge::Frame>(f);
+    deferred->ClearDepthStencilView(dsv.Get(),D3D11_CLEAR_DEPTH,farScene,0);
+    effectRecording.record(1,{dsv,{0,0,32,32,0,1},camera,effectFrame,1000});
+    require(effectRecording.sealDepth(deferred.Get(),dsv.Get()),"opaque depth copy records before a depth-writing attack effect");
+    require(!effectRecording.sealDepth(deferred.Get(),dsv.Get()),"consecutive FX draws do not allocate another scene depth copy");
+    deferred->ClearDepthStencilView(dsv.Get(),D3D11_CLEAR_DEPTH,nearEffect,0);
+    ComPtr<ID3D11CommandList> effectList;
+    require(SUCCEEDED(deferred->FinishCommandList(FALSE,&effectList)),"finish geometry and attack FX in one native command list");
+    c->ExecuteCommandList(effectList.Get(),TRUE);
+    require(renderer.upload(c.Get(),f),"restore full world fixture for attack FX occlusion");
+    c->ClearRenderTargetView(target.Get(),blue);
+    require(renderer.draw(c.Get(),target.Get(),effectRecording.draws[0].cleanDepth.Get(),camera,32,32,false,false),"compose MC against pre-FX depth from the same deferred list");
+    require(read()[0]>250,"MC remains visible when an attack effect later overwrites native depth");
+    c->ClearRenderTargetView(target.Get(),blue);
+    require(renderer.draw(c.Get(),target.Get(),dsv.Get(),camera,32,32,false,false),"compare contaminated attack effect depth");
+    require(read()[2]>250,"contaminated original depth reproduces the old MC disappearance");
     std::cout << checks << " D3D11 composite checks passed\n";
 }

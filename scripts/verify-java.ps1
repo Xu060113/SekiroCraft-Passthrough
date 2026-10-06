@@ -33,6 +33,8 @@ if(!$gameJar -or !$asmJars.Count){throw 'Mapped game or ASM dependency missing; 
 $gsonJar=Get-ChildItem -LiteralPath "$projectRoot\.cache\gradle-home\caches\modules-2\files-2.1\com.google.code.gson\gson" -Recurse -File -Filter '*.jar'|Where-Object Name -NotLike '*sources*'|Select-Object -First 1
 if(!$gsonJar){throw 'Gson dependency missing'}
 $verificationClasspath=(@($asmJars)+@($gsonJar.FullName)) -join ';'
+& java '-cp' $verificationClasspath "$projectRoot\tests\VanillaShield.java" $gameJar.FullName
+if($LASTEXITCODE){throw 'Vanilla shield direction checks failed'}
 & java '-cp' $verificationClasspath "$projectRoot\tests\MixinTargets.java" $gameJar.FullName "$projectRoot\mc\build\classes\java\main\dev\sekirobridge\mixin"
 if($LASTEXITCODE){throw 'Minecraft injection target verification failed'}
 $productionGame=Get-ChildItem -LiteralPath "$projectRoot\.cache\gradle-home\caches\fabric-loom\minecraftMaven\net\minecraft\minecraft-merged-intermediary" -Recurse -File -Filter '*.jar'|Select-Object -First 1

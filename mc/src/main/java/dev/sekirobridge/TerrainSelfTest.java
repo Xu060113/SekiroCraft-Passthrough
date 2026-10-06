@@ -22,6 +22,11 @@ public final class TerrainSelfTest {
     }
     public static void run(){
         checks=0;
+        require(net.minecraft.entity.DamageUtil.getDamageLeft(10,0,0)==10,"vanilla unarmored incoming damage remains unchanged");
+        float diamond=net.minecraft.entity.DamageUtil.getDamageLeft(10,20,8);
+        require(Math.abs(diamond-3f)<1e-6,"vanilla diamond armor and toughness reduce an incoming 10-point hit to 3");
+        require(net.minecraft.entity.DamageUtil.getDamageLeft(40,20,8)<net.minecraft.entity.DamageUtil.getDamageLeft(40,20,0),"vanilla toughness protects against stronger incoming attacks");
+        require(Math.abs(net.minecraft.entity.DamageUtil.getInflictedDamage(diamond,20)-.6f)<1e-6,"vanilla protection reduces the already armor-reduced injury");
         var state=new Protocol.State(1,1000,123,3,768,0,0,0,0,1.6f,0,0,0,1,
             1.1f,1.7f,.05f,1000,0,1,1280,720,new byte[32],0,0,0,0,0,0,new int[8],180);
         var grid=new TerrainGeometry();

@@ -50,11 +50,13 @@ static void hit(uintptr_t module,uintptr_t source,void *packet){auto p=reinterpr
     store(targetData,0x148,std::max(0,field<int32_t>(targetData,0x148)-int(field<float>(p,0xe0))));
     store(p,0x1e0,123.f); // Native mutable scratch is confined to this dispatch.
 }
-static uintptr_t find(uintptr_t,uint32_t handle){return handle==456?targetChr:0;}
+static uintptr_t find(uintptr_t,uint32_t handle){return handle==456?targetChr:handle==123?attackerChr:0;}
 static void hp(uintptr_t data,int32_t value){++hpCalls;
     if(value==0 && (field<uint8_t>(data,0x228)&4))value=1;
     store(data,0x130,value);
 }
+static bridge::NativeCombatAdapter *defenseAdapter{};
+static void routedHeroHp(uintptr_t data,int32_t value){hp(data,defenseAdapter->incomingHp(data,value));}
 static void posture(uintptr_t data,int32_t value,uint8_t recovery){
     if(recovery!=1)throw std::runtime_error("stage recovery ABI");store(data,0x148,value);
 }
@@ -78,6 +80,7 @@ int main(){int checks{};auto check=[&](bool ok,const char *message){++checks;if(
     bytes(0xbd6710,{0x48,0x89,0x6c,0x24,0x18,0x48,0x89,0x74,0x24,0x20,0x57,0x48,0x83,0xec,0x20,0x41});
     bytes(0xbd679a,{0x89,0x87,0x48,0x01,0,0,0x85,0xdb});
     bytes(0xb6e800,{0x89,0x91,0x5c,0x02,0,0});
+    bytes(0xb6e892,{0xe8,0xa9,0x64,0x06,0});
     bridge::SharedMemory memory;check(memory.open(L"native-hit-test-"+std::to_wstring(GetCurrentProcessId())),"combat channels");
     bridge::NativeCombatAdapter adapter;adapter.initialize(base,memory);check(adapter.ready() && adapter.prepareNativeHits(),"production code gates accept verified image");
     image[0x997cf0]=0;bridge::NativeHitBackend disabled;check(!disabled.initialize(base),"changed parent initializer refuses dispatch");image[0x997cf0]=0x80;
@@ -108,7 +111,8 @@ int main(){int checks{};auto check=[&](bool ok,const char *message){++checks;if(
     adapter.gameTick(ptr(manager)+1,.016f);adapter.gameTick(ptr(manager),0);adapter.gameTick(ptr(manager),NAN);
     check(hitCalls==0,"wrong manager and paused/invalid frame reject native entry");
     adapter.gameTick(ptr(manager),.016f);check(hitCalls==1 && initCalls==1 && lookupCalls==1,"owned normal packet dispatches exactly once on combat update");
-    check(field<int32_t>(targetData,0x130)==900 && field<int32_t>(targetData,0x148)==180 && hpCalls==0,"native engine owns HP and posture outcomes");
+    check(field<int32_t>(targetData,0x130)==990 && field<int32_t>(targetData,0x148)==198 && hpCalls==0,"native engine owns HP and posture outcomes");
+    check(1000-field<int32_t>(targetData,0x130)==10,"2 MC damage costs 1 percent of a default Boss stage, not 10 percent");
     check(field<int32_t>(targetData,0x25c)==2 && bridge::bridgeVitalWriteDepth==0,"normal hits do not edit Boss nodes and trace scope unwinds");
     adapter.gameTick(ptr(manager),.016f);check(hitCalls==1,"acknowledged native command is not replayed");
     report.command=2;report.commands[1]={2,state.actors[0].id,2,0,1};report.tick=GetTickCount64();memory.combatReport.write(report);adapter.tick(9,true);
@@ -156,6 +160,75 @@ int main(){int checks{};auto check=[&](bool ok,const char *message){++checks;if(
     memory.combatReport.write(report);adapter.tick(9,true);adapter.gameTick(ptr(manager),.016f);
     check(phaseCalls==1 && field<int32_t>(targetData,0x25c)==1 && adapter.phaseFallbacks==2 && adapter.phaseConfirmed==3,
         "mob damage prefers native phase packet and never double decrements after engine confirmation");
-    std::cout<<checks<<" native hit ownership, game context, deduplication and register checks passed\n";
+    defenseAdapter=&adapter;adapter.defenseReady(true);
+    report.tick=GetTickCount64();memory.combatReport.write(report);adapter.tick(9,true);
+    bridge::NativeInjuries injuries;
+    check(memory.nativeInjuries.read(injuries) && injuries.hero==state.hero && injuries.session==7,"incoming damage channel is paired to current MC report and native life");
+    // Synthetic native caller returns at the exact live HP damage stack RVA.
+    // It calls the production filter, so script/fall paths cannot masquerade as combat.
+    uint8_t call[]{0x48,0x83,0xec,0x28,0x48,0xb8,0,0,0,0,0,0,0,0,0xff,0xd0,0x48,0x83,0xc4,0x28,0xc3};
+    auto route=reinterpret_cast<uintptr_t>(routedHeroHp);std::memcpy(call+6,&route,8);std::memcpy(image+0xb690f0,call,sizeof(call));
+    auto incomingHp=reinterpret_cast<void(*)(uintptr_t,int32_t)>(base+0xb690f0);
+    incomingHp(ptr(heroData),900);
+    check(field<int32_t>(ptr(heroData),0x130)==900,"native damage retained until a vanilla server acknowledges defense readiness");
+    store(ptr(heroData),0x130,int32_t(1000));
+    bridge::NativeInjuryAck injuryAck{GetTickCount64(),9,state.hero,7,0};memory.nativeInjuryAck.write(injuryAck);
+    std::array<uint8_t,0x280> incomingPacket{};auto packet=reinterpret_cast<uintptr_t>(incomingPacket.data());
+    store(packet,0x190,targetChr);store(packet,0x28,int32_t(1));adapter.incoming(ptr(heroDamage),packet);
+    incomingHp(ptr(heroData),0);
+    check(field<int32_t>(ptr(heroData),0x130)==1000,"lethal native attack waits for vanilla armor/shield processing before committing HP/death");
+    adapter.tick(9,true);memory.nativeInjuries.read(injuries);
+    check(injuries.produced==1 && injuries.hits[0].ratio==1 && injuries.hits[0].flags==1 && injuries.hits[0].source.x==40,"raw native attack and actual attacker position reach vanilla defense once");
+    injuryAck.processed=1;memory.nativeInjuryAck.write(injuryAck);report.damage=.1;report.tick=GetTickCount64();memory.combatReport.write(report);adapter.tick(9,true);
+    check(field<int32_t>(ptr(heroData),0x130)==900,"only vanilla's reduced injury is written back to native HP");
+    auto raw=adapter.incomingHp(ptr(heroData),800);
+    check(raw==800,"native script/fall HP writes outside verified attack stack bypass armor routing");
+    // Ranged callers may arrive at the shared damage core without B69100.
+    std::memcpy(image+0xb6e887,call,sizeof(call));
+    auto coreHp=reinterpret_cast<void(*)(uintptr_t,int32_t)>(base+0xb6e887);
+    auto routeHit=[&](uintptr_t callerSource=0){
+        injuryAck.tick=GetTickCount64();memory.nativeInjuryAck.write(injuryAck);
+        report.tick=GetTickCount64();memory.combatReport.write(report);adapter.tick(9,true);
+        adapter.incoming(ptr(heroDamage),packet,callerSource);coreHp(ptr(heroData),800);
+        adapter.tick(9,true);memory.nativeInjuries.read(injuries);
+    };
+    store(packet,0x190,uintptr_t(0));routeHit(targetChr);
+    check(injuries.produced==2 && injuries.hits[1].flags==1 && injuries.hits[1].source.x==40 &&
+          field<int32_t>(ptr(heroData),0x130)==900,"ranged core HP path preserves the caller's live source actor for shields");
+    injuryAck.processed=2;
+    store(packet,0x130,sc::Vec3{1,3,3});store(packet,0x150,sc::Vec3{0,0,1});routeHit();
+    check(injuries.produced==3 && injuries.hits[2].flags==1 && injuries.hits[2].source.z==1 &&
+          adapter.routedTrajectoryInjuries==1,"ownerless forward-moving projectile recovers the incoming side rather than the player's view");
+    injuryAck.processed=3;
+    store(packet,0x150,sc::Vec3{0,0,-1});routeHit();
+    check(injuries.produced==4 && injuries.hits[3].source.z==5,"rear projectile keeps the opposite incoming side for vanilla shield rejection");
+    injuryAck.processed=4;
+    store(packet,0x150,sc::Vec3{});routeHit();
+    check(injuries.produced==5 && injuries.hits[4].flags==0 && adapter.routedUnknownInjuries==1,
+          "missing projectile direction never grants an arbitrary shield origin");
+    injuryAck.processed=5;
+    store(packet,0x150,sc::Vec3{NAN,0,1});routeHit();
+    check(injuries.produced==6 && injuries.hits[5].flags==0,"nonfinite projectile metadata cannot grant directional immunity");
+    injuryAck.processed=6;
+    store(packet,0x150,sc::Vec3{0,0,1});store(packet,0x130,sc::Vec3{100,3,3});routeHit();
+    check(injuries.produced==7 && injuries.hits[6].flags==0,"remote impact unrelated to the hero cannot supply a shield direction");
+    injuryAck.processed=7;
+    // An intervening hit on an NPC must invalidate the player's same-thread source.
+    adapter.incoming(ptr(targetDamage),packet);coreHp(ptr(heroData),800);
+    check(field<int32_t>(ptr(heroData),0x130)==800,"core HP path without a current player hit retains native damage");
+    store(ptr(heroData),0x130,int32_t(900));
+    store(packet,0x130,sc::Vec3{1,3,3});store(packet,0x150,sc::Vec3{0,0,1});
+    adapter.incoming(ptr(heroDamage),packet);Sleep(60);coreHp(ptr(heroData),800);
+    check(field<int32_t>(ptr(heroData),0x130)==800,"stale player hit cannot route later core HP writes through shields");
+    check(adapter.routedCoreInjuries==6,"alternate attack core accounts for routed ranged damage");
+    sc::Vec3 origin;
+    check(!bridge::injuryOriginFromTrajectory({1,2,3},{1,3,3},{0,1,0},origin),"vertical trajectory cannot fabricate a horizontal shield side");
+    check(!bridge::injuryOriginFromTrajectory({1,2,3},{1,3,3},{0,0,10},origin),"unnormalized collision metadata cannot supply a shield side");
+    injuryAck.tick=1;memory.nativeInjuryAck.write(injuryAck);incomingHp(ptr(heroData),800);
+    check(field<int32_t>(ptr(heroData),0x130)==800,"stale defense acknowledgement cannot leave player invulnerable");
+    injuryAck.tick=GetTickCount64();memory.nativeInjuryAck.write(injuryAck);
+    store(packet,0x28,int32_t(5));adapter.incoming(ptr(heroDamage),packet);incomingHp(ptr(heroData),0);
+    check(field<int32_t>(ptr(heroData),0x130)==0,"native deathblow remains unshieldable and never enters the vanilla injury ring");
+    std::cout<<checks<<" native hit ownership, defense routing, game context and register checks passed\n";
     VirtualFree(image,0,MEM_RELEASE);
 }

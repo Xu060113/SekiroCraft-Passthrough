@@ -20,6 +20,13 @@ class NativeCombatAdapter {
     bool dead_{};
     CombatReport report_{};
     NativeHitBackend nativeHit_;
+    NativeInjuryQueue injuries_;
+    std::atomic<bool> defenseReady_{};
+    bool coreHpReady_{};
+    int normalHealthPoints_=40,bossHealthPoints_=200;
+    struct Incoming {uintptr_t chr;sc::Vec3 source;uint64_t tick;int32_t type;bool known;bool trajectory;};
+    inline static thread_local Incoming incoming_{};
+    int healthPoints(const Vital &v)const{return v.bossNode>0?bossHealthPoints_:normalHealthPoints_;}
     std::atomic<bool> nativeHits_{};
     std::atomic<bool> phaseFinishes_{};
     std::atomic<bool> autoBossPhases_{};
@@ -126,7 +133,7 @@ class NativeCombatAdapter {
                     refreshStage(a,v);
                     if(cmd.stage!=a.stage){ackCommand_=seq;break;}
                     if(native){
-                        success=v.hp==0 || nativeHit_.dispatch(player.chr,v.chr,player.position,v.position,v.maxHp,v.maxPosture,cmd);
+                        success=v.hp==0 || nativeHit_.dispatch(player.chr,v.chr,player.position,v.position,v.maxHp,v.maxPosture,cmd,false,healthPoints(v));
                         if(success && autoBossPhases_)finishDepletedStage(a,player,cmd);
                         Vital after;
                         bool remote=cmd.kind==1 || cmd.kind==2 || cmd.kind==3 || cmd.kind==5;
@@ -147,7 +154,7 @@ class NativeCombatAdapter {
                         }
                     }
                     else {
-                        auto target=damageHp(v.hp,v.maxHp,cmd.amount/20.,0);
+                        auto target=damageHp(v.hp,v.maxHp,cmd.amount/healthPoints(v),0);
                         // A Boss can retain native nodes without NoDeath bit 4.
                         // Compatibility damage must not bypass its finisher.
                         if(v.bossNode>0)target=std::max(1,target);
@@ -163,7 +170,7 @@ class NativeCombatAdapter {
         if(!postureReady_ || !resolves(v.chr,v.handle) || !read(v.chr,current) ||
            current.data!=v.data || current.handle!=v.handle || current.hp==0 ||
            current.maxPosture<=0 || current.posture<=0 || (current.bits&24))return false;
-        int target=damageHp(current.posture,current.maxPosture,amount/20.,0);
+        int target=damageHp(current.posture,current.maxPosture,amount/healthPoints(current),0);
         BridgeVitalWrite write;
         reinterpret_cast<SetPosture>(base_+0xbd6710)(current.data,target,0);return true;
     }
@@ -183,7 +190,57 @@ class NativeCombatAdapter {
             WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(v.data+0x228),&bits,1,&n);}
     }
   public:
+    void balance(int normalPoints,int bossPoints){normalHealthPoints_=std::clamp(normalPoints,20,10000);bossHealthPoints_=std::clamp(bossPoints,20,10000);}
+    void defenseReady(bool ready){defenseReady_=ready;}
+    bool defenseReady()const{return defenseReady_;}
+    void incoming(uintptr_t context,uintptr_t packet,uintptr_t sourceActor=0)noexcept{
+        incoming_={};uintptr_t chr{},source{};Vital defender,attacker;
+        if(!sc::readMemory(context+8,chr) || !read(chr,defender) ||
+           !sc::readMemory(packet+0x28,incoming_.type))return;
+        incoming_.chr=chr;incoming_.tick=GetTickCount64();
+        if(sc::readMemory(packet+0x190,source) && source!=chr && read(source,attacker)){
+            incoming_.source=attacker.position;incoming_.known=true;return;}
+        // RDX is the native caller's source actor; some packets leave +190 empty.
+        if(sourceActor && sourceActor!=chr && read(sourceActor,attacker)){
+            incoming_.source=attacker.position;incoming_.known=true;return;}
+        sc::Vec3 impact{},travel{};
+        if(sc::readMemory(packet+0x130,impact) && sc::readMemory(packet+0x150,travel) &&
+           injuryOriginFromTrajectory(defender.position,impact,travel,incoming_.source)){
+            incoming_.known=true;incoming_.trajectory=true;}
+    }
+    int32_t incomingHp(uintptr_t data,int32_t requested)noexcept{
+        if(!defenseReady_ || bridgeVitalWriteDepth || paused_)return requested;
+        std::unique_lock lock(mutex_,std::try_to_lock);if(!lock)return requested;
+        auto now=GetTickCount64();Vital player;
+        if(!combatActive_ || !fresh(now,controlAt_) || !fresh(now,report_.tick) || report_.hero!=heroId_ || report_.epoch!=epoch_ ||
+           !read(hero(),player) || player.data!=data || player.chr!=hero_ || player.handle!=heroHandle_ ||
+           player.hp<=0 || requested>=player.hp || report_.invulnerable)return requested;
+        bool sourceFresh=incoming_.chr==player.chr && now>=incoming_.tick && now-incoming_.tick<=50;
+        // Keep the original normal-hit path. Also accept the fingerprinted core
+        // attack HP call with a same-thread, current native hit entry: ranged
+        // callers need not pass through the original outer B69100 call site.
+        // Falls and scripts without that core stack and hit entry still bypass.
+        std::array<void*,20> stack{};bool attack=false,core=false;
+        auto count=CaptureStackBackTrace(0,stack.size(),stack.data(),nullptr);
+        for(unsigned i=0;i<count;++i){auto address=reinterpret_cast<uintptr_t>(stack[i]);
+            if(address==base_+0xb69100)attack=true;
+            if(coreHpReady_ && address==base_+0xb6e897)core=true;}
+        if(!attack && !(core && sourceFresh))return requested;
+        if(sourceFresh && incoming_.type==5)return requested; // Native deathblow is not a shieldable hit.
+        NativeInjuryAck ack;
+        if(!memory_->nativeInjuryAck.read(ack) || !injuries_.acknowledge(ack,now))return requested;
+        float ratio=float((double(player.hp)-requested)/player.maxHp);
+        if(!injuries_.push(ratio,sourceFresh?incoming_.source:sc::Vec3{},sourceFresh && incoming_.known))return requested;
+        if(sourceFresh && incoming_.known){
+            routedDirectionalInjuries.fetch_add(1);
+            if(incoming_.trajectory)routedTrajectoryInjuries.fetch_add(1);
+        }else routedUnknownInjuries.fetch_add(1);
+        if(!attack && core)routedCoreInjuries.fetch_add(1);
+        routedInjuries.fetch_add(1);return player.hp;
+    }
     std::atomic<uint64_t> observed{},applied{},rejected{},publishedActors{};
+    std::atomic<uint64_t> routedInjuries{};
+    std::atomic<uint64_t> routedDirectionalInjuries{},routedTrajectoryInjuries{},routedUnknownInjuries{},routedCoreInjuries{};
     std::atomic<uint64_t> appliedPosture{};
     std::atomic<uint64_t> phaseDispatched{},phaseConfirmed{},phaseRejected{};
     std::atomic<uint64_t> phaseFallbacks{};
@@ -194,6 +251,7 @@ class NativeCombatAdapter {
         postureReady_=ready_ && code(0xbd6710,std::array<uint8_t,16>{0x48,0x89,0x6c,0x24,0x18,0x48,0x89,0x74,0x24,0x20,0x57,0x48,0x83,0xec,0x20,0x41}) &&
             code(0xbd679a,std::array<uint8_t,8>{0x89,0x87,0x48,0x01,0x00,0x00,0x85,0xdb});
         nodeReady_=postureReady_ && code(0xb6e800,std::array<uint8_t,6>{0x89,0x91,0x5c,0x02,0x00,0x00});
+        coreHpReady_=ready_ && code(0xb6e892,std::array<uint8_t,5>{0xe8,0xa9,0x64,0x06,0x00});
         sc::log("Native HP / posture signatures="+std::to_string(ready_)+"/"+std::to_string(postureReady_));}
     bool ready()const{return ready_;}
     bool postureReady()const{return postureReady_;}
@@ -235,7 +293,7 @@ class NativeCombatAdapter {
         if(!ready_)return;std::unique_lock lock(mutex_,std::try_to_lock);if(!lock)return;
         auto now=GetTickCount64();Vital player;
         controlAt_=now;combatActive_=active;
-        if(epoch_!=epoch){release();epoch_=epoch;hero_=0;actors_={};session_=ackCommand_=0;damage_=heal_=0;}
+        if(epoch_!=epoch){release();epoch_=epoch;hero_=0;actors_={};session_=ackCommand_=0;damage_=heal_=0;injuries_.reset();}
         if(!read(hero(),player)){release();return;}
         if(hero_!=player.chr || heroData_!=player.data || heroHandle_!=player.handle){release();
             hero_=player.chr;heroData_=player.data;heroHandle_=player.handle;heroId_=++nextId_;
@@ -248,6 +306,11 @@ class NativeCombatAdapter {
         dead_=player.hp==0;
         CombatReport next;if(memory_->combatReport.read(next) && validCombat(next))report_=next;
         bool peer=active && player.hp>0 && report_.epoch==epoch && report_.hero==heroId_ && fresh(now,report_.tick);
+        if(peer && defenseReady_){
+            if(!injuries_.matches(epoch_,heroId_,report_.session))injuries_.reset(epoch_,heroId_,report_.session);
+            NativeInjuryAck ack;if(memory_->nativeInjuryAck.read(ack))injuries_.acknowledge(ack,now);
+            memory_->nativeInjuries.write(injuries_.snapshot(now));
+        }else injuries_.reset();
         protect(player,peer && report_.invulnerable);
         if(peer){
             if(session_!=report_.session){session_=report_.session;ackCommand_=0;damage_=heal_=0;}

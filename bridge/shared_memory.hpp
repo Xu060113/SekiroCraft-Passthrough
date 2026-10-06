@@ -10,6 +10,7 @@
 #include "physics.hpp"
 #include "session.hpp"
 #include "combat.hpp"
+#include "native_injury.hpp"
 #include "native_action.hpp"
 #include "projectile_rays.hpp"
 #include <string>
@@ -59,6 +60,8 @@ class SharedMemory {
     SnapshotChannel<TerrainPacket> terrain;
     SnapshotChannel<CombatState> combatState;
     SnapshotChannel<CombatReport> combatReport;
+    SnapshotChannel<NativeInjuries> nativeInjuries;
+    SnapshotChannel<NativeInjuryAck> nativeInjuryAck;
     SnapshotChannel<NativeActionRequest> nativeAction;
     SnapshotChannel<ProjectileRays> projectileRays;
     SnapshotChannel<ProjectileHits> projectileHits;
@@ -82,7 +85,8 @@ class SharedMemory {
         if (!physics.open(channel)) return false;
         if (!input.open(channel,L"input-v3") || !player.open(channel,L"player-v2") ||
             !terrain.open(channel,L"terrain-v2") || !combatState.open(channel,L"combat-state-v3") ||
-            !combatReport.open(channel,L"combat-report-v2") || !nativeAction.open(channel,L"native-action-v1") ||
+            !combatReport.open(channel,L"combat-report-v2") || !nativeInjuries.open(channel,L"native-injuries-v1") ||
+            !nativeInjuryAck.open(channel,L"native-injury-ack-v1") || !nativeAction.open(channel,L"native-action-v1") ||
             !projectileRays.open(channel,L"projectile-rays-v1") || !projectileHits.open(channel,L"projectile-hits-v1")) {close();return false;}
         auto name = L"Local\\SekiroBridge-" + channel;
         mutex_ = CreateMutexW(nullptr, FALSE, (name + L"-lock").c_str());
@@ -113,6 +117,7 @@ class SharedMemory {
         physics.close();
         input.close(); player.close(); terrain.close();
         combatState.close();combatReport.close();
+        nativeInjuries.close();nativeInjuryAck.close();
         nativeAction.close();
         projectileRays.close();projectileHits.close();
         if (bytes_)

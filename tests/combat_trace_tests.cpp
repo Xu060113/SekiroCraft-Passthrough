@@ -9,6 +9,11 @@ uint32_t scTraceVector[4]{0x12345678,0x87654321,0xabcdef01,0x10fedcba},scTraceOb
 }
 static int hpCalls{},postureCalls{};
 static int hitCalls{};
+static int defenseEntries{};
+static uintptr_t defenseSource{},defensePacket{};
+static void defenseHit(void*,uintptr_t,uintptr_t packet,uintptr_t source)noexcept{
+    ++defenseEntries;defenseSource=source;defensePacket=packet;
+}
 static uintptr_t hitSetter(uintptr_t context,uintptr_t attack,uintptr_t hit,uintptr_t mode){
     if(!context || !attack || !hit || mode!=0x12345)throw std::runtime_error("native hit arguments changed");
     ++hitCalls;*reinterpret_cast<uint8_t*>(hit)=0xcd;return 777;
@@ -47,6 +52,7 @@ int main(){int n{};auto check=[&](bool ok,const char *s){++n;if(!ok)throw std::r
     auto root=std::filesystem::temp_directory_path()/(L"sekiro-trace-test-"+std::to_wstring(GetCurrentProcessId()));
     std::filesystem::create_directories(root);
     auto trace=new bridge::CombatTrace;
+    trace->defense(nullptr,nullptr,defenseHit);
     check(!trace->install(base,false,root),"unverified native entry refuses tracing");
     check(MH_Initialize()==MH_OK && trace->install(base,true,root),"real production detours install");
     auto hp=reinterpret_cast<void(*)(uintptr_t,int)>(base+0xbd64e0);
@@ -65,8 +71,11 @@ int main(){int n{};auto check=[&](bool ok,const char *s){++n;if(!ok)throw std::r
     check(nativeHit(reinterpret_cast<uintptr_t>(context.data()),reinterpret_cast<uintptr_t>(attack.data()),
                     reinterpret_cast<uintptr_t>(hit.data()),0x12345)==777 && hitCalls==1 && hit[0]==0xcd,
         "real hit detour tail-calls original once with original arguments and result");
+    check(defenseEntries==1 && defenseSource==reinterpret_cast<uintptr_t>(attack.data()) &&
+          defensePacket==reinterpret_cast<uintptr_t>(hit.data()),"defense observer receives the original source actor argument and packet separately");
     {bridge::BridgeVitalWrite write;nativeHit(reinterpret_cast<uintptr_t>(context.data()),
         reinterpret_cast<uintptr_t>(attack.data()),reinterpret_cast<uintptr_t>(hit.data()),0x12345);}
+    check(defenseEntries==1,"bridge outgoing attacks never masquerade as incoming projectile damage");
     std::ofstream(root/L"combat-trace.stop").close();
     std::string content;
     for(int i=0;i<30;++i){Sleep(50);for(auto &entry:std::filesystem::directory_iterator(root))

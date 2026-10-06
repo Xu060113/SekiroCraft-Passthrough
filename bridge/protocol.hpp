@@ -10,7 +10,7 @@
 namespace bridge {
 // Fixed little-endian ABI. Java Protocol.java is its other implementation.
 constexpr uint32_t magic = 0x31504253; // SBP1
-constexpr uint32_t version = 2, maxWidth = 1920, maxHeight = 1080;
+constexpr uint32_t version = 3, maxWidth = 1920, maxHeight = 1080;
 constexpr uint32_t maxPixels = maxWidth * maxHeight, slots = 3;
 constexpr uint32_t maxFrameBytes = maxPixels * 12;
 enum Flags : uint32_t { Scene = 1, Focus = 2, Edit = 4, Menu = 8, Reset = 16, NativeDead = 32, NativeAction = 64, NativeUI=128, NativeGrapple=256 };

@@ -1,6 +1,8 @@
 param([string]$MinecraftDirectory='E:\.minecraft\versions\1.20.1-Fabric 0.16.10',[switch]$Diagnostic,
-      [string]$NativeGrappleKey='',[switch]$AutoBossPhases)
+      [string]$NativeGrappleKey='',[switch]$AutoBossPhases,
+      [int]$NormalHealthPoints=0,[int]$BossHealthPoints=0)
 $ErrorActionPreference='Stop'
+foreach($points in @($NormalHealthPoints,$BossHealthPoints)){if($points -ne 0 -and ($points -lt 20 -or $points -gt 10000)){throw 'Health point budgets must be 20-10000, or 0 to retain the current setting.'}}
 if($NativeGrappleKey -and $NativeGrappleKey -notmatch '^[A-Za-z]$'){throw 'NativeGrappleKey must be a single letter matching the Sekiro binding.'}
 function Get-OwnedRelativePath([string]$Root,[string]$Path){
     $prefix=[IO.Path]::GetFullPath($Root).TrimEnd('\')+'\'
@@ -18,9 +20,11 @@ function Assert-GamesClosed {
 Assert-GamesClosed
 $packageRoot=Join-Path $projectRoot 'dist\SekiroCraft-Passthrough'
 $manifest=Get-Content -LiteralPath (Join-Path $projectRoot 'build\verification.json') -Raw | ConvertFrom-Json
-if(!$manifest.verified -or $manifest.patch -notin @('gameplay2-combatfix1','gameplay3-life-actions-projectiles','gameplay4-gui-native-combat')){throw 'Build and verify a supported paired package first.'}
-$guiPatch=$manifest.patch -eq 'gameplay4-gui-native-combat'
-if($guiPatch -and $manifest.protocol -ne 2){throw 'Expected paired protocol v2.'}
+if(!$manifest.verified -or $manifest.patch -notin @('gameplay2-combatfix1','gameplay3-life-actions-projectiles','gameplay4-gui-native-combat','gameplay5-defense-render')){throw 'Build and verify a supported paired package first.'}
+$guiPatch=$manifest.patch -in @('gameplay4-gui-native-combat','gameplay5-defense-render')
+$expectedProtocol=if($manifest.patch -eq 'gameplay5-defense-render'){3}else{2}
+if($guiPatch -and $manifest.protocol -ne $expectedProtocol){throw "Expected paired protocol v$expectedProtocol."}
+if(($NormalHealthPoints -or $BossHealthPoints) -and $manifest.patch -ne 'gameplay5-defense-render'){throw 'Configurable health budgets require the paired defense package.'}
 if($Diagnostic -and !$guiPatch){throw 'Diagnostic mode requires the paired GUI/native combat package.'}
 if($AutoBossPhases -and (!$guiPatch -or 'HP-depleted Boss stage mode' -notin $manifest.experimental)){throw 'Build a paired package supporting HP-depleted Boss stages first.'}
 $gameRoot=[IO.Path]::GetFullPath($record.gameDirectory)
@@ -89,6 +93,17 @@ try {
             $ini=[regex]::Replace($ini,'(?im)^\s*grapple_key\s*=.*(?:\r?\n|$)','')
             $key=$NativeGrappleKey.ToUpperInvariant()
             $ini=[regex]::Replace($ini,'(?im)^(\[SekiroBridge\][^\r\n]*\r?\n)',{param($m);$m.Value+"grapple_key=$key`r`n"})
+        }
+        if($manifest.patch -eq 'gameplay5-defense-render'){
+            foreach($setting in @(@('normal_health_points',$NormalHealthPoints,40),@('boss_health_points',$BossHealthPoints,200))){
+                $name=$setting[0];$value=$setting[1];$default=$setting[2]
+                if($value){$ini=[regex]::Replace($ini,"(?im)^\s*$name\s*=.*(?:\r?\n|$)",'')}
+                if($ini -notmatch "(?im)^\s*$name\s*="){
+                    if(!$value){$value=$default}
+                    $line="$name=$value`r`n"
+                    $ini=[regex]::Replace($ini,'(?im)^(\[SekiroBridge\][^\r\n]*\r?\n)',{param($m);$m.Value+$line})
+                }
+            }
         }
         Set-Content -LiteralPath $configTarget -Value $ini -Encoding UTF8
     }

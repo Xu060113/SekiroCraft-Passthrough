@@ -110,6 +110,19 @@ JNIEXPORT jboolean JNICALL Java_dev_sekirobridge_NativeBridge_combatReport(JNIEn
     bridge::CombatReport p;std::memcpy(&p,ptr,sizeof(p));
     return bridge::validCombat(p) && reinterpret_cast<bridge::SharedMemory*>(handle)->combatReport.write(p);
 }
+JNIEXPORT jboolean JNICALL Java_dev_sekirobridge_NativeBridge_nativeInjuries(JNIEnv *env,jclass,jlong handle,jobject b) {
+    if(!handle || !b || env->GetDirectBufferCapacity(b)<jlong(sizeof(bridge::NativeInjuries)))return false;
+    auto ptr=env->GetDirectBufferAddress(b);if(!ptr)return false;
+    bridge::NativeInjuries p;
+    if(!reinterpret_cast<bridge::SharedMemory*>(handle)->nativeInjuries.read(p) || !bridge::validInjuries(p))return false;
+    std::memcpy(ptr,&p,sizeof(p));return true;
+}
+JNIEXPORT jboolean JNICALL Java_dev_sekirobridge_NativeBridge_nativeInjuryAck(JNIEnv *env,jclass,jlong handle,jobject b) {
+    if(!handle || !b || env->GetDirectBufferCapacity(b)<jlong(sizeof(bridge::NativeInjuryAck)))return false;
+    auto ptr=env->GetDirectBufferAddress(b);if(!ptr)return false;
+    bridge::NativeInjuryAck p;std::memcpy(&p,ptr,sizeof(p));
+    return p.tick && p.epoch && p.hero && p.session && reinterpret_cast<bridge::SharedMemory*>(handle)->nativeInjuryAck.write(p);
+}
 JNIEXPORT jboolean JNICALL Java_dev_sekirobridge_NativeBridge_terrain(JNIEnv *env,jclass,jlong handle,jobject b) {
     if(!handle || !b || env->GetDirectBufferCapacity(b)<jlong(sizeof(bridge::TerrainPacket)))return false;
     auto ptr=env->GetDirectBufferAddress(b);if(!ptr)return false;

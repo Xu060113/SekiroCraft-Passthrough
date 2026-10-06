@@ -10,6 +10,21 @@
 #include <mutex>
 
 namespace bridge {
+// Particles and attack trails must never nominate the scene depth/camera.
+inline bool opaqueScenePass(ID3D11DeviceContext *context){
+    if(!context)return false;
+    Microsoft::WRL::ComPtr<ID3D11DepthStencilState> depth;UINT stencil{};
+    context->OMGetDepthStencilState(&depth,&stencil);
+    if(depth){D3D11_DEPTH_STENCIL_DESC d{};depth->GetDesc(&d);
+        if(!d.DepthEnable || d.DepthWriteMask!=D3D11_DEPTH_WRITE_MASK_ALL ||
+           d.DepthFunc==D3D11_COMPARISON_ALWAYS || d.DepthFunc==D3D11_COMPARISON_NEVER)return false;}
+    Microsoft::WRL::ComPtr<ID3D11BlendState> blend;float factors[4]{};UINT mask{};
+    context->OMGetBlendState(&blend,factors,&mask);
+    if(blend){D3D11_BLEND_DESC d{};blend->GetDesc(&d);
+        if(d.AlphaToCoverageEnable)return false;
+        for(unsigned i=0;i<(d.IndependentBlendEnable?8u:1u);++i)if(d.RenderTarget[i].BlendEnable)return false;}
+    return true;
+}
 // Lock order is scene -> metadata for immediate contexts. Deferred workers only
 // touch metadata, so a busy Present never drops their recording boundaries.
 class RecordingGate {
@@ -32,8 +47,9 @@ class DepthSnapshot {
     uint64_t captures{};
     ID3D11DepthStencilView *view() const { return view_.Get(); }
     void reset() { view_.Reset(); texture_.Reset(); description_ = {}; }
-    bool capture(ID3D11DeviceContext *context, ID3D11DepthStencilView *source) {
-        if (!context || !source || context->GetType() != D3D11_DEVICE_CONTEXT_IMMEDIATE)
+    bool capture(ID3D11DeviceContext *context, ID3D11DepthStencilView *source,bool recordDeferred=false) {
+        if (!context || !source || (context->GetType() != D3D11_DEVICE_CONTEXT_IMMEDIATE &&
+            !(recordDeferred && context->GetType()==D3D11_DEVICE_CONTEXT_DEFERRED)))
             return false;
         Microsoft::WRL::ComPtr<ID3D11Resource> resource;
         source->GetResource(&resource);
@@ -75,11 +91,46 @@ struct SceneDraw {
     std::shared_ptr<Frame> frame;
     uint64_t score{};
     bool clearsDepth{};
+    Microsoft::WRL::ComPtr<ID3D11DepthStencilView> cleanDepth;
+};
+inline bool validNativeSceneDraw(const SceneDraw &draw){
+    return !draw.clearsDepth && draw.depth && draw.camera.valid &&
+           draw.viewport.Width>0 && draw.viewport.Height>0 && draw.score>0;
+}
+inline bool validSceneCandidate(const SceneDraw &draw){
+    return validNativeSceneDraw(draw) && draw.frame;
+}
+
+// The peer needs Scene before it can export its first image. Native readiness
+// must therefore be observed independently of the paired compositor snapshot.
+// Only executed opaque scene draws reach observe; clears and unpaired images
+// cannot replace the separately selected render depth/camera.
+class NativeSceneReadiness {
+    bool observed_{};
+    uint64_t lastFrame_{};
+  public:
+    void observe(const SceneDraw &draw,uint64_t frame){
+        if(validNativeSceneDraw(draw)){observed_=true;lastFrame_=frame;}
+    }
+    bool ready(bool playerValid,bool cameraValid,bool dead,uint64_t frame) const {
+        return playerValid && cameraValid && observed_ && frame>=lastFrame_ &&
+               (dead || frame-lastFrame_<=2);
+    }
+    void reset(){observed_=false;lastFrame_=0;}
 };
 
 struct SceneRecording {
     uint64_t generation{};
     std::vector<SceneDraw> draws;
+    bool sealDepth(ID3D11DeviceContext *context,ID3D11DepthStencilView *source){
+        for(auto i=draws.rbegin();i!=draws.rend();++i){
+            if(i->depth.Get()!=source)continue;
+            if(i->clearsDepth || i->cleanDepth || !validSceneCandidate(*i))return false;
+            DepthSnapshot copy;if(!copy.capture(context,source,true))return false;
+            i->cleanDepth=copy.view();return true;
+        }
+        return false;
+    }
     void record(uint64_t currentGeneration, SceneDraw draw) {
         if (generation != currentGeneration) {
             generation = currentGeneration;
@@ -91,6 +142,7 @@ struct SceneRecording {
             draws.back().depth.Get() == draw.depth.Get() &&
             draws.back().frame == draw.frame) {
             draw.score += draws.back().score;
+            if(!draw.cleanDepth)draw.cleanDepth=draws.back().cleanDepth;
             draws.back() = std::move(draw);
         } else
             draws.push_back(std::move(draw));

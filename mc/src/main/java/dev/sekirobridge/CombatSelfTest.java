@@ -3,6 +3,14 @@ public final class CombatSelfTest {
     static int checks;
     static void check(boolean ok,String message){++checks;if(!ok)throw new AssertionError(message);}
     public static void main(String[] args){
+        var injury=Protocol.direct(NativeDefenseProtocol.BYTES);
+        injury.putLong(0,1000).putLong(8,12).putLong(16,34).putLong(24,56).putLong(32,1);
+        injury.putLong(40,1).putFloat(48,.5f).putInt(52,1).putFloat(56,2).putFloat(60,3).putFloat(64,-4);
+        var nativeHit=NativeDefenseProtocol.decode(injury);
+        check(nativeHit!=null && nativeHit.hits().get(0).sourceKnown() && nativeHit.hits().get(0).z()==-4,"native injury source and normalized raw damage decode");
+        injury.putLong(40,2);check(NativeDefenseProtocol.decode(injury)==null,"native hit ring rejects missing sequence");injury.putLong(40,1);
+        injury.putFloat(48,Float.NaN);check(NativeDefenseProtocol.decode(injury)==null,"native defense rejects nonfinite injury");injury.putFloat(48,.5f);
+        injury.putInt(52,2);check(NativeDefenseProtocol.decode(injury)==null,"native defense rejects unknown source flags");injury.putInt(52,1);
         var l=new HealthLedger();
         check(l.synchronize(1,.8,0,0,false)==.8,"native health seeds, no initial difference counted");
         check(l.damage==0 && l.heal==0,"seed sends no injury");

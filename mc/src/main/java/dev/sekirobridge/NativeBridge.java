@@ -25,7 +25,7 @@ public final class NativeBridge {
         if (!Files.exists(dll) || !MessageDigest.isEqual(bytes, Files.readAllBytes(dll)))
             Files.write(dll, bytes);
         System.load(dll.toAbsolutePath().toString());
-        if(abiVersion()!=2)throw new IllegalStateException("Mismatched bridge JNI ABI; install the paired DLL and JAR.");
+        if(abiVersion()!=3)throw new IllegalStateException("Mismatched bridge JNI ABI; install the paired DLL and JAR.");
     }
     public static native int abiVersion();
     public static native long open(String channel);
@@ -40,6 +40,8 @@ public final class NativeBridge {
     public static native boolean terrain(long handle, ByteBuffer packet);
     public static native boolean combatState(long handle, ByteBuffer packet);
     public static native boolean combatReport(long handle, ByteBuffer packet);
+    public static native boolean nativeInjuries(long handle, ByteBuffer packet);
+    public static native boolean nativeInjuryAck(long handle, ByteBuffer packet);
     public static native boolean nativeAction(long handle, ByteBuffer packet);
     public static native boolean projectileRays(long handle, ByteBuffer packet);
     public static native boolean projectileHits(long handle, ByteBuffer packet);

@@ -113,6 +113,7 @@ struct App {
     std::shared_ptr<bridge::Frame> renderFrame;
     std::shared_ptr<bridge::Frame> cameraFrame, sceneFrame;
     bridge::DepthSnapshot sceneSnapshot;
+    bridge::NativeSceneReadiness sceneReadiness;
     std::shared_ptr<bridge::Frame> snapshotFrame;
     sc::Camera snapshotCamera;
     uint64_t snapshotAt=UINT64_MAX;
@@ -133,6 +134,7 @@ struct App {
     ComPtr<ID3D11DeviceContext> context;
     ComPtr<ID3D11RenderTargetView> target;
     ComPtr<ID3D11DepthStencilView> sceneDepth;
+    ComPtr<ID3D11DepthStencilView> sceneCleanDepth;
     D3D11_VIEWPORT sceneViewport{};
     struct Binding {
         ComPtr<ID3D11DepthStencilView> depth;
@@ -156,6 +158,7 @@ struct App {
     std::set<UINT> observedContextTypes;
     uint64_t bestDepthScore{};
     std::atomic<uint64_t> indexedCalls{}, instancedCalls{}, targetCalls{};
+    std::atomic<uint64_t> ignoredEffectDraws{};
     HWND window{};
     IDXGISwapChain *swap{};
     std::atomic<WNDPROC> previousWndProc{};
@@ -221,7 +224,7 @@ struct App {
         camera = c.value_or(sc::Camera{});
         auto vitals = host.vitals();
         bool dead=vitals.valid && vitals.hp==0;
-        bool scene = player.valid && camera.valid && sceneDepth && (dead || frames - depthFrame <= 2);
+        bool scene = sceneReadiness.ready(player.valid,camera.valid,dead,frames);
         bool nativeUI=sc::input::nativeUI.load() || !edit;
         bool capturing = focused && (showMenu || (!nativeUI && scene && (mcStatus.load() & 2) != 0));
         bool mcOwner=scene && playerFeatures && driver.ready() && movement.installed() &&
@@ -270,6 +273,8 @@ struct App {
             control.capabilities |= bridge::mcOwnerCapability | bridge::terrainCapability;
         if(playerFeatures && combat.ready() && (control.capabilities & bridge::mcOwnerCapability))
             control.capabilities |= bridge::combatCapability;
+        if(playerFeatures && combat.defenseReady() && (control.capabilities & bridge::combatCapability))
+            control.capabilities |= bridge::nativeDefenseCapability;
         std::fill(control.keys.begin(), control.keys.end(), 0);
         control.buttons = 0;
         if (focused && !showMenu) {
@@ -371,6 +376,11 @@ struct App {
                     " phaseRejected="+std::to_string(combat.phaseRejected.load())+
                     " postureHits="+std::to_string(combat.appliedPosture.load())+" actors="+std::to_string(combat.publishedActors.load())+
                     " hits="+std::to_string(combat.applied.load())+" rejected="+std::to_string(combat.rejected.load()));
+            sc::log("defense routed="+std::to_string(combat.routedInjuries.load())+
+                    " directional="+std::to_string(combat.routedDirectionalInjuries.load())+
+                    " trajectory="+std::to_string(combat.routedTrajectoryInjuries.load())+
+                    " unknown="+std::to_string(combat.routedUnknownInjuries.load())+
+                    " corePath="+std::to_string(combat.routedCoreInjuries.load()));
         }
     }
     void hud() {
@@ -404,6 +414,13 @@ struct App {
                     (unsigned long long)executedLists);
         ImGui::Text("World=%llu | HUD=%llu | depth copies=%llu",(unsigned long long)compositor.submitted,
                     (unsigned long long)compositor.overlaySubmitted,(unsigned long long)sceneSnapshot.captures);
+        ImGui::Text("Ignored FX draws=%llu | native hits routed to MC=%llu",(unsigned long long)ignoredEffectDraws.load(),
+                    (unsigned long long)combat.routedInjuries.load());
+        ImGui::Text("Defense direction=%llu | trajectory=%llu | unknown=%llu | core path=%llu",
+                    (unsigned long long)combat.routedDirectionalInjuries.load(),
+                    (unsigned long long)combat.routedTrajectoryInjuries.load(),
+                    (unsigned long long)combat.routedUnknownInjuries.load(),
+                    (unsigned long long)combat.routedCoreInjuries.load());
         ImGui::Text("Native ground hits=%llu / 81 | mouse state/data=%llu/%llu",
             (unsigned long long)driver.terrainHits.load(),(unsigned long long)sc::input::mouseStates.load(),
             (unsigned long long)sc::input::mouseData.load());
@@ -544,7 +561,7 @@ bool captureSceneDepth(ID3D11DeviceContext *context) {
     if (!a.sceneDepth || !a.sceneFrame || a.depthFrame != a.frames ||
         !bridge::Compositor::matchesCamera(a.sceneFrame->meta, a.sceneCamera))
         return false;
-    if (!a.sceneSnapshot.capture(context, a.sceneDepth.Get())) {
+    if (!a.sceneSnapshot.capture(context, a.sceneCleanDepth?a.sceneCleanDepth.Get():a.sceneDepth.Get())) {
         ++a.snapshotFailures;
         a.snapshotFrame.reset();
         a.snapshotAt = UINT64_MAX;
@@ -565,20 +582,22 @@ void flushImmediateDepth(ID3D11DeviceContext *context) {
 }
 void submitSceneDraw(const bridge::SceneDraw &draw) {
     auto &a = *app;
+    a.sceneReadiness.observe(draw,a.frames);
     if (draw.clearsDepth) {
         a.depthScores.erase(draw.depth.Get());
         if (a.sceneDepth.Get() == draw.depth.Get()) {
-            a.sceneFrame.reset();
-            a.sceneCamera = {};
+            if(!a.sceneCleanDepth){a.sceneFrame.reset();a.sceneCamera={};}
             a.bestDepthScore = 0;
         }
         return;
     }
+    if(!bridge::validSceneCandidate(draw) || !bridge::Compositor::matchesCamera(draw.frame->meta,draw.camera))return;
     auto &score = a.depthScores[draw.depth.Get()];
     score += draw.score;
     if (score >= a.bestDepthScore) {
         a.bestDepthScore = score;
         a.sceneDepth = draw.depth;
+        a.sceneCleanDepth = draw.cleanDepth;
         a.sceneViewport = draw.viewport;
         a.depthFrame = a.frames;
         a.sceneCamera = draw.camera;
@@ -599,6 +618,10 @@ void STDMETHODCALLTYPE hookClearDepth(ID3D11DeviceContext *context, ID3D11DepthS
     Flag flag;
     bool tracked = (flags & D3D11_CLEAR_DEPTH) && depth && gameContext(context);
     bool immediate = context->GetType() == D3D11_DEVICE_CONTEXT_IMMEDIATE;
+    if(tracked && !immediate)withRecording(context,[&]{
+        auto recording=app->recordings.find(context);
+        if(recording!=app->recordings.end())recording->second.sealDepth(context,depth);
+    });
     if (tracked && immediate) {
         std::unique_lock guard(appMutex, std::try_to_lock);
         if (guard.owns_lock()) {
@@ -630,6 +653,7 @@ void recordDraw(ID3D11DeviceContext *context, UINT count) {
     auto &a = *app;
     if (!nativeDevice.load() || count < 100)
         return;
+    if(!bridge::opaqueScenePass(context)){a.ignoredEffectDraws.fetch_add(1);return;}
     auto found = a.bindings.find(context);
     if (found == a.bindings.end() || !found->second.depth)
         return;
@@ -671,6 +695,18 @@ void recordDraw(ID3D11DeviceContext *context, UINT count) {
         if (a.sceneDepth.Get() == draw.depth.Get())
             a.immediateDirty = true;
     }
+}
+void prepareEffectDraw(ID3D11DeviceContext *context){
+    if(!gameContext(context) || bridge::opaqueScenePass(context))return;
+    ComPtr<ID3D11DepthStencilState> depth;UINT stencil{};context->OMGetDepthStencilState(&depth,&stencil);
+    if(depth){D3D11_DEPTH_STENCIL_DESC d{};depth->GetDesc(&d);
+        if(!d.DepthEnable || d.DepthWriteMask==D3D11_DEPTH_WRITE_MASK_ZERO)return;}
+    withRecording(context,[&]{
+        auto &a=*app;
+        if(context->GetType()==D3D11_DEVICE_CONTEXT_IMMEDIATE){flushImmediateDepth(context);return;}
+        auto bound=a.bindings.find(context);auto recording=a.recordings.find(context);
+        if(bound!=a.bindings.end() && recording!=a.recordings.end())recording->second.sealDepth(context,bound->second.depth.Get());
+    });
 }
 template <int I>
 HRESULT STDMETHODCALLTYPE hookFinishCommands(ID3D11DeviceContext *context, BOOL restore,
@@ -795,6 +831,7 @@ void STDMETHODCALLTYPE hookViewports(ID3D11DeviceContext *context, UINT count, c
 template <int I>
 void STDMETHODCALLTYPE hookInstanced(ID3D11DeviceContext *context, UINT count, UINT instances, UINT start,
                                      INT base, UINT first) {
+    if(!inMod && ready){Flag flag;prepareEffectDraw(context);}
     originalInstanced[I](context, count, instances, start, base, first);
     if (!inMod && ready) {
             Flag flag;
@@ -806,6 +843,7 @@ void STDMETHODCALLTYPE hookInstanced(ID3D11DeviceContext *context, UINT count, U
 }
 template <int I>
 void STDMETHODCALLTYPE hookDraw(ID3D11DeviceContext *context, UINT count, UINT start, INT base) {
+    if(!inMod && ready){Flag flag;prepareEffectDraw(context);}
     originalDraw[I](context, count, start, base);
     if (!inMod && ready) {
             Flag flag;
@@ -917,7 +955,7 @@ HRESULT STDMETHODCALLTYPE hookPresent(IDXGISwapChain *swap, UINT interval, UINT 
         }
         ++a.frames;
         a.immediateDirty=false;
-        a.sceneFrame.reset();a.sceneCamera={};
+        a.sceneFrame.reset();a.sceneCamera={};a.sceneCleanDepth.Reset();
         a.depthScores.clear();
         a.bestDepthScore = 0;
     } catch (const std::exception &e) {
@@ -956,6 +994,8 @@ HRESULT STDMETHODCALLTYPE hookResize(IDXGISwapChain *swap, UINT count, UINT widt
         a.host.avatarVisibility(false);
         a.target.Reset();
         a.sceneDepth.Reset();
+        a.sceneReadiness.reset();
+        a.sceneCleanDepth.Reset();
         {std::lock_guard metadataLock(a.recorder.mutex());
             a.bindings.clear();a.recordings.clear();
             a.recordingGeneration.fetch_add(1);++a.resourceEpoch;
@@ -1029,9 +1069,16 @@ DWORD WINAPI scBootstrap(void *) {
             sc::log("Hook installation failed.");
             return 0;
         }
-        if(GetPrivateProfileIntW(L"SekiroBridge",L"combat_trace",0,config.c_str()))
-            sc::log(app->combatTrace.install(app->host.base(),app->combat.postureReady(),sc::dataRoot)
-                    ? "Combat trace hooks installed." : "Combat trace unavailable; original combat retained.");
+        app->combat.balance(GetPrivateProfileIntW(L"SekiroBridge",L"normal_health_points",40,config.c_str()),
+                            GetPrivateProfileIntW(L"SekiroBridge",L"boss_health_points",200,config.c_str()));
+        app->combatTrace.defense(&app->combat,
+            [](void *adapter,uintptr_t data,int32_t hp)noexcept{return static_cast<bridge::NativeCombatAdapter*>(adapter)->incomingHp(data,hp);},
+            [](void *adapter,uintptr_t context,uintptr_t packet,uintptr_t source)noexcept{static_cast<bridge::NativeCombatAdapter*>(adapter)->incoming(context,packet,source);});
+        bool damageHooks=app->combatTrace.install(app->host.base(),app->combat.postureReady(),sc::dataRoot,
+            GetPrivateProfileIntW(L"SekiroBridge",L"combat_trace",0,config.c_str())!=0);
+        app->combat.defenseReady(damageHooks && app->combatTrace.incomingReady());
+        sc::log(app->combat.defenseReady()?"Native enemy damage routes through vanilla MC shields and armor.":
+            "Native defense hooks unavailable; native damage retained.");
         if(GetPrivateProfileIntW(L"SekiroBridge",L"native_hits",0,config.c_str()))
             sc::log(app->combatGameHook.install(app->host.base(),app->combat)
                     ? "Experimental native normal-hit dispatch installed on AttackManager update."

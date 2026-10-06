@@ -41,6 +41,13 @@ public final class JniPeer {
         report.putFloat(80,Float.NaN);
         if(NativeBridge.combatReport(handle,report))throw new AssertionError("invalid injury accepted");
         report.putFloat(80,7);
+        var injuries=Protocol.direct(2088);
+        while(System.currentTimeMillis()<deadline && !NativeBridge.nativeInjuries(handle,injuries))Thread.sleep(5);
+        if(injuries.getLong(16)!=101 || injuries.getLong(24)!=103 || injuries.getLong(32)!=1 || injuries.getFloat(48)!=.25f || injuries.getFloat(56)!=12)
+            throw new AssertionError("raw native incoming hit direction/ratio ABI");
+        if(NativeBridge.nativeInjuries(handle,Protocol.direct(2087)))throw new AssertionError("short native injury state accepted");
+        var injuryAck=Protocol.direct(40);injuryAck.putLong(NativeBridge.clockMs()).putLong(state.epoch()).putLong(101).putLong(103).putLong(1);
+        if(!NativeBridge.nativeInjuryAck(handle,injuryAck) || NativeBridge.nativeInjuryAck(handle,Protocol.direct(39)))throw new AssertionError("native defense acknowledgement ABI");
         var nativeAction=Protocol.direct(32);nativeAction.putLong(NativeBridge.clockMs()).putLong(state.epoch()).putLong(77).putInt(1).putInt(0);
         if(!NativeBridge.nativeAction(handle,nativeAction) || NativeBridge.nativeAction(handle,Protocol.direct(31)))throw new AssertionError("native resurrection action ABI");
         var rays=Protocol.direct(2080);rays.putLong(1).putLong(NativeBridge.clockMs()).putLong(state.epoch()).putInt(1).putInt(0)

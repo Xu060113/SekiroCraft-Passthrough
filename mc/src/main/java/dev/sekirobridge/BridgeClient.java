@@ -134,8 +134,8 @@ public final class BridgeClient implements ClientModInitializer {
             handle = NativeBridge.open(p.getProperty("channel", "default"));
             if (handle == 0)
                 throw new IllegalStateException("Shared memory channel could not be opened");
-            LOG.info("Bridge ready, protocol v2; dormant until /sekirobridge on in a dedicated " +
-                     "single-player world");
+            LOG.info("Bridge ready, protocol v{}; dormant until /sekirobridge on in a dedicated " +
+                     "single-player world", NativeBridge.abiVersion());
         } catch (Exception | UnsatisfiedLinkError e) {
             LOG.error("Bridge disabled; Minecraft remains usable", e);
             handle = 0;

@@ -25,6 +25,10 @@ public final class CombatBridge {
     private static final ByteBuffer incoming=Protocol.direct(CombatProtocol.STATE_BYTES);
     private static volatile CombatProtocol.State state;
     private static volatile byte[] outgoing;
+    private static final ByteBuffer defenseIncoming=Protocol.direct(NativeDefenseProtocol.BYTES);
+    private static volatile NativeDefenseProtocol.State defenseState;
+    private static volatile byte[] defenseAck;
+    private static long injuryProcessed;
     private static volatile boolean serverActive;
     private static final Map<Long,NativeActorProxy> proxies=new HashMap<>();
     private static final HealthLedger health=new HealthLedger();
@@ -51,6 +55,12 @@ public final class CombatBridge {
             var next=CombatProtocol.decode(incoming);
             if(next!=null && next.epoch()==BridgeClient.state().epoch() && Protocol.fresh(NativeBridge.clockMs(),next.tick()))state=next;
         }
+        if((BridgeClient.state().capabilities()&2048)!=0 && NativeBridge.nativeInjuries(BridgeClient.handle(),defenseIncoming)){
+            var next=NativeDefenseProtocol.decode(defenseIncoming);
+            if(next!=null && next.epoch()==BridgeClient.state().epoch() && Protocol.fresh(NativeBridge.clockMs(),next.tick()))defenseState=next;
+        }
+        var ack=defenseAck;if(ack!=null){var buffer=Protocol.direct(ack.length);buffer.put(ack);buffer.putLong(0,NativeBridge.clockMs());
+            NativeBridge.nativeInjuryAck(BridgeClient.handle(),buffer);}
         var bytes=outgoing;if(bytes!=null){var buffer=Protocol.direct(bytes.length);buffer.put(bytes);
             // The integrated server can pause while the visible peer is still alive.
             // Refresh only the transport heartbeat, never health totals or queued hits.
@@ -91,6 +101,24 @@ public final class CombatBridge {
         }
         serverActive=true;
         boolean immune=p.isCreative() || p.isSpectator();
+        var injuries=defenseState;
+        if(injuries!=null && injuries.epoch()==epoch && injuries.hero()==hero && injuries.session()==session && Protocol.fresh(now,injuries.tick())){
+            for(var hit:injuries.hits())if(hit.sequence()>injuryProcessed){
+                if(!health.seeded)break;
+                // Use vanilla's full damage path, including directional shield checks,
+                // armor/toughness, enchantments, resistance, durability and hurt cooldown.
+                if(!immune && p.isAlive()){
+                    var type=p.getWorld().getRegistryManager().get(net.minecraft.registry.RegistryKeys.DAMAGE_TYPE)
+                        .entryOf(net.minecraft.entity.damage.DamageTypes.MOB_ATTACK);
+                    var origin=hit.sourceKnown()?new net.minecraft.util.math.Vec3d(pose.mcX(hit.x()),pose.mcY(hit.y()),pose.mcZ(hit.z())):null;
+                    var source=new net.minecraft.entity.damage.DamageSource(type,origin);
+                    p.damage(source,hit.ratio()*p.getMaxHealth());
+                }
+                injuryProcessed=hit.sequence();
+            }
+            var ack=Protocol.direct(NativeDefenseProtocol.ACK_BYTES);ack.putLong(now).putLong(epoch).putLong(hero).putLong(session).putLong(injuryProcessed);
+            var bytes=new byte[ack.capacity()];ack.clear();ack.get(bytes);defenseAck=bytes;
+        }
         ackCommand=s.ackSession()==session?Math.min(command,s.ackCommand()):0;
         double ad=s.ackSession()==session?s.ackDamage():0,ah=s.ackSession()==session?s.ackHeal():0;
         boolean nativeHurt=hurtFeedback.update((double)s.hp()/s.maxHp(),ad,ah,immune);
@@ -120,6 +148,6 @@ public final class CombatBridge {
     }
     /** Server thread only: removes ephemeral actors and discards its delta ledger. */
     public static void release(){serverActive=false;for(var proxy:proxies.values())proxy.discard();proxies.clear();
-        owner=null;hero=epoch=command=ackCommand=0;health.reset();hurtFeedback.reset();outgoing=null;}
-    public static void resetClient(){state=null;outgoing=null;}
+        owner=null;hero=epoch=command=ackCommand=injuryProcessed=0;health.reset();hurtFeedback.reset();outgoing=null;defenseAck=null;defenseState=null;}
+    public static void resetClient(){state=null;outgoing=null;defenseState=null;defenseAck=null;}
 }

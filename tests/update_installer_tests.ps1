@@ -91,8 +91,8 @@ Write-Output "$checks total paired-update and life/action rollback checks passed
 function GuiFixture([string]$name){
     $f=LifeFixture $name
     $manifest=Get-Content "$($f.dir)\build\verification.json" -Raw|ConvertFrom-Json
-    $manifest.patch='gameplay4-gui-native-combat'
-    $manifest|Add-Member -NotePropertyName protocol -NotePropertyValue 2
+    $manifest.patch='gameplay5-defense-render'
+    $manifest|Add-Member -NotePropertyName protocol -NotePropertyValue 3
     $manifest|ConvertTo-Json -Depth 6|Set-Content "$($f.dir)\build\verification.json"
     New-Item -ItemType Directory -Path "$($f.mc)\sekirobridge" -Force|Out-Null
     Set-Content "$($f.mc)\sekirobridge\bridge.properties" "channel=custom`ngui_trace=false"
@@ -152,3 +152,19 @@ Check (!(Test-Path "$($f.game)\sekirocraft.ini") -and !(Test-Path "$($f.mc)\opti
 $report=Get-Content "$($f.dir)\runtime\combatfix1-verification.json" -Raw|ConvertFrom-Json
 Check ($null -eq $report.originalConfigHash -and $null -eq $report.mcOptionsHash) 'missing settings recorded as absent'
 Write-Output "$checks total paired-update, fresh-install and rollback checks passed."
+$f=GuiFixture 'configurable-health'
+& "$($f.dir)\scripts\update-installed.ps1" -MinecraftDirectory $f.mc -NormalHealthPoints 80 -BossHealthPoints 500|Out-Null
+$ini=Get-Content "$($f.game)\sekirobridge.ini" -Raw
+Check ($ini -match 'normal_health_points=80' -and $ini -match 'boss_health_points=500') 'explicit normal and Boss health budgets installed'
+& "$($f.dir)\scripts\update-installed.ps1" -MinecraftDirectory $f.mc|Out-Null
+$ini=Get-Content "$($f.game)\sekirobridge.ini" -Raw
+Check ($ini -match 'normal_health_points=80' -and $ini -match 'boss_health_points=500') 'later paired updates retain custom health budgets'
+$f=GuiFixture 'v3-reject-v2'
+$manifest=Get-Content "$($f.dir)\build\verification.json" -Raw|ConvertFrom-Json
+$manifest.protocol=2;$manifest|ConvertTo-Json -Depth 6|Set-Content "$($f.dir)\build\verification.json"
+$failed=$false;try{& "$($f.dir)\scripts\update-installed.ps1" -MinecraftDirectory $f.mc|Out-Null}catch{$failed=$true}
+Check $failed 'defense package rejects an older ABI header before installation'
+$f=GuiFixture 'invalid-health';$before=(Get-FileHash "$($f.game)\sekirobridge.ini").Hash
+$failed=$false;try{& "$($f.dir)\scripts\update-installed.ps1" -MinecraftDirectory $f.mc -BossHealthPoints 1|Out-Null}catch{$failed=$true}
+Check ($failed -and (Get-FileHash "$($f.game)\sekirobridge.ini").Hash -eq $before) 'invalid health budget fails before mutation'
+Write-Output "$checks total paired-update, health budget and rollback checks passed."

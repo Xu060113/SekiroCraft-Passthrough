@@ -48,7 +48,7 @@ class NativeHitBackend {
             code(0x9f0410,std::array<uint8_t,11>{0x48,0x8b,0xc4,0x57,0x48,0x81,0xec,0xa0,0x00,0x00,0x00});
     }
     bool dispatch(uintptr_t attacker,uintptr_t target,const sc::Vec3 &from,const sc::Vec3 &to,
-                  int32_t maxHp,int32_t maxPosture,const DamageCommand &command,bool finish=false)const {
+                  int32_t maxHp,int32_t maxPosture,const DamageCommand &command,bool finish=false,int healthPoints=20)const {
         auto amount=command.amount;
         if(finish && !phaseReady()){failure_=7;return false;}
         if(!ready_ || !attacker || attacker==target || !sc::finite(from) || !sc::finite(to) ||
@@ -71,8 +71,9 @@ class NativeHitBackend {
         reinterpret_cast<Initialize>(base_+0x997890)(&packet);
         // Explicit scalar fields of the observed ordinary sword profile. Leave
         // status-effect lists, ownership and remaining flags at native defaults.
-        auto health=float(std::clamp(double(maxHp)*amount/20.,1.,double(maxHp)));
-        auto posture=float(std::clamp(double(maxPosture)*amount/20.,0.,double(maxPosture)));
+        auto divisor=std::clamp(healthPoints,20,10000);
+        auto health=float(std::clamp(double(maxHp)*amount/divisor,1.,double(maxHp)));
+        auto posture=float(std::clamp(double(maxPosture)*amount/divisor,0.,double(maxPosture)));
         packet.put(0x00,health);packet.put(0x20,11.f);
         // Native sample: first grounded Kusabimaru swing (5000010). The old
         // 5000061 weak-hit identity and reaction strengths were not this profile.

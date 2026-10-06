@@ -1,6 +1,10 @@
-# Shared-memory protocol v2
+# Shared-memory protocol v3
 
-The current GUI/native-combat patch changes the ABI. Update host DLL and MC JAR/JNI together; JNI exposes `abiVersion()` and the mapping header rejects older participants. Descriptions below of v1 side channels are historical; this table and the v2 sections override their sizes and offsets.
+The current defense/render patch requires ABI v3. The main image mapping and existing side channel layouts are unchanged from v2. JNI/header version 3 rejects mixed DLL/JAR builds. New capability bit 2048 advertises verified incoming damage routing.
+
+`native-injuries-v1` is 2088 bytes: tick/epoch/hero/session/produced uint64 at 0/8/16/24/32, then 64 entries of 32 bytes at 40. Each entry has sequence uint64 at 0, native HP damage ratio float at 8, flags uint32 at 12 (1: known attacker position), native source xyz at 16/20/24, zero reserved uint32 at 28. `native-injury-ack-v1` is 40 bytes: tick/epoch/hero/session/processed uint64. Unacknowledged injuries are never overwritten. Stale/missing acknowledgements, full queues, scripted death, falls, bridge writes and native deathblows retain native damage. A fingerprinted HP attack stack gates routing before the original setter commits HP/death. The integrated server converts the raw ratio to MC health points and calls vanilla player damage; the existing cumulative ledger reports only actual post-defense HP loss back to the host. Resurrection/epoch/session changes invalidate old injuries. Native posture/reaction animation remains native.
+
+Historical v2 GUI/native-combat changes follow. Update host DLL and MC JAR/JNI together; JNI exposes `abiVersion()` and the mapping header rejects older participants. Descriptions below of v1 side channels are historical; this table and the v2 sections override their sizes and offsets.
 
 | Current structure/channel | Bytes | Changes from v1 |
 | --- | ---: | --- |

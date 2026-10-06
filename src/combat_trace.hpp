@@ -32,6 +32,10 @@ class CombatTrace {
         bool attackRead{},hitRead{};
     };
     inline static CombatTrace *instance_{};
+    void *defenseContext_{};
+    int32_t (*defenseHp_)(void*,uintptr_t,int32_t) noexcept{};
+    void (*defenseHit_)(void*,uintptr_t,uintptr_t,uintptr_t) noexcept{};
+    bool incomingReady_{};
     uintptr_t base_{};SetHp hp_{};SetPosture posture_{};
     std::mutex mutex_;std::array<Event,2048> events_{};
     size_t head_{},count_{};std::atomic<uint64_t> dropped_{};
@@ -70,7 +74,9 @@ class CombatTrace {
         queue(e);
     }
     static void hitCallback(uintptr_t context,uintptr_t attack,uintptr_t hit,uintptr_t mode)noexcept{
-        auto *self=instance_;if(!self || !self->enabled_.load(std::memory_order_relaxed))return;
+        auto *self=instance_;if(!self)return;
+        if(!bridgeVitalWriteDepth && self->defenseHit_)self->defenseHit_(self->defenseContext_,context,hit,attack);
+        if(!self->enabled_.load(std::memory_order_relaxed))return;
         Event e{};e.kind=3;e.tick=GetTickCount64();e.thread=GetCurrentThreadId();
         e.hitId=++self->hitSequence_;e.args={context,attack,hit,mode};e.bridge=bridgeVitalWriteDepth!=0;
         uintptr_t chr{},modules{},data{},vt{};
@@ -81,6 +87,7 @@ class CombatTrace {
     }
     static void hpHook(uintptr_t data,int32_t hp){
         auto *self=instance_;Event e{};bool record=self->begin(e,data,hp,1);
+        if(!bridgeVitalWriteDepth && self->defenseHp_)hp=self->defenseHp_(self->defenseContext_,data,hp);
         self->hp_(data,hp);if(record)self->end(e);
     }
     static void postureHook(uintptr_t data,int32_t posture,uint8_t recovery){
@@ -113,6 +120,9 @@ class CombatTrace {
         }out.flush();
     }
   public:
+    void defense(void *context,int32_t (*hp)(void*,uintptr_t,int32_t) noexcept,
+                 void (*hit)(void*,uintptr_t,uintptr_t,uintptr_t) noexcept){defenseContext_=context;defenseHp_=hp;defenseHit_=hit;}
+    bool incomingReady()const{return incomingReady_;}
     // Present samples only changes; the existing bounded writer owns all file I/O.
     void animation(NativeAnimation value,uint32_t actionFlags){
         auto now=GetTickCount64();if(!enabled_ || now-animationTick_<16)return;
@@ -127,7 +137,7 @@ class CombatTrace {
     }
     // The host has already matched the complete executable and both setter
     // signatures. Installation happens before any bridge vital writes.
-    bool install(uintptr_t base,bool signaturesVerified,const std::filesystem::path &root){
+    bool install(uintptr_t base,bool signaturesVerified,const std::filesystem::path &root,bool recording=true){
         if(!signaturesVerified || instance_)return false;
         base_=base;started_=GetTickCount64();activity_=started_;instance_=this;
         auto hp=reinterpret_cast<void*>(base+0xbd64e0),pose=reinterpret_cast<void*>(base+0xbd6710);
@@ -135,7 +145,8 @@ class CombatTrace {
         if(MH_CreateHook(pose,reinterpret_cast<void*>(postureHook),reinterpret_cast<void**>(&posture_))!=MH_OK){
             MH_RemoveHook(hp);instance_=nullptr;return false;}
         auto path=root/(L"combat-trace-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(started_)+L".jsonl");
-        std::ofstream out(path);if(!out){MH_RemoveHook(hp);MH_RemoveHook(pose);instance_=nullptr;return false;}
+        std::ofstream out;if(recording)out.open(path);
+        if(recording && !out){MH_RemoveHook(hp);MH_RemoveHook(pose);instance_=nullptr;return false;}
         // Entry has been identified in live HP/posture stacks. The assembly
         // probe restores arguments, registers and SIMD state, then tail-jumps
         // to the original. It never assumes a native ApplyDamage return ABI.
@@ -146,9 +157,11 @@ class CombatTrace {
         bool hitReady=sc::readMemory(base+0xb68ff0,hitEntry) && hitEntry==expectedHit &&
             MH_CreateHook(hit,reinterpret_cast<void*>(scCombatHitTraceEntry),&scCombatHitTraceContinue)==MH_OK;
         if(hitReady){scCombatHitTraceCallback=hitCallback;MH_QueueEnableHook(hit);}
-        enabled_=true;
+        enabled_=recording;
         MH_QueueEnableHook(hp);MH_QueueEnableHook(pose);
         if(MH_ApplyQueued()!=MH_OK){enabled_=false;MH_DisableHook(hp);MH_DisableHook(pose);if(hitReady)MH_DisableHook(hit);return false;}
+        incomingReady_=hitReady;
+        if(!recording){sc::log("Verified incoming damage hooks installed without trace recording.");return true;}
         std::thread([this,root,out=std::move(out)]()mutable{
             out<<"{\"schema\":\"sekiro-vital-trace-v1\",\"process\":"<<GetCurrentProcessId()
                <<",\"hpSetterRva\":\"bd64e0\",\"postureSetterRva\":\"bd6710\",\"hitEntryRva\":\"b68ff0\"}\n";

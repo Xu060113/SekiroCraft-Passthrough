@@ -15,6 +15,19 @@ static void fixturePosture(uintptr_t data,int left,uint8_t recovery){
 }
 int main(){int n{};auto check=[&](bool b,const char*s){++n;if(!b)throw std::runtime_error(s);};
     using namespace bridge;
+    NativeInjuryQueue injuries;injuries.reset(7,2,3);
+    NativeInjuryAck injuryAck{1000,7,2,3,0};
+    check(injuries.acknowledge(injuryAck,1000),"fresh vanilla server accepts initial defense handshake");
+    for(int i=0;i<64;++i)check(injuries.push(.25f,{1,2,3},true),"pending native attack retained");
+    check(!injuries.push(.25f,{1,2,3},true),"full injury ring never overwrites unprocessed lethal hits");
+    auto injuryState=injuries.snapshot(1000);
+    check(validInjuries(injuryState) && injuryState.hits[0].sequence==1 && injuryState.hits[63].sequence==64,"native damage ring includes direction and stable sequences");
+    injuryAck.processed=65;check(!injuries.acknowledge(injuryAck,1000),"future injury acknowledgement rejected");
+    injuryAck.processed=1;injuryAck.hero=99;check(!injuries.acknowledge(injuryAck,1000),"other life cannot acknowledge injuries");
+    injuryAck.hero=2;check(injuries.acknowledge(injuryAck,1000) && injuries.push(.5f,{4,5,6},true),"only acknowledged injury slot may wrap");
+    injuryAck.processed=0;check(!injuries.acknowledge(injuryAck,1000),"old acknowledgement cannot reopen retired injury slots");
+    injuryAck.processed=2;check(!injuries.acknowledge(injuryAck,5000),"stale vanilla client cannot grant native defense");
+    injuries.reset(7,9,4);check(injuries.snapshot(1000).produced==0 && !injuries.acknowledge(injuryAck,1000),"resurrection clears pending native attacks and rejects old life ack");
     CombatState state;state.sequence=1;state.epoch=7;state.hero=2;state.flags=1;state.hp=250;state.maxHp=500;
     check(validCombat(state),"valid native life");state.hp=501;check(!validCombat(state),"invalid HP");state.hp=250;
     state.posture=101;state.maxPosture=100;check(!validCombat(state),"posture above maximum rejected");state.posture=80;
@@ -76,7 +89,7 @@ int main(){int n{};auto check=[&](bool b,const char*s){++n;if(!b)throw std::runt
     check(memory.combatState.read(state) && state.count==1 && state.actors[0].posture==200 &&
           state.actors[0].bossNode==2 && (state.actors[0].flags&4),"boss counters and native NoDeath exported");
     p={};p.tick=GetTickCount64();p.epoch=8;p.hero=state.hero;p.session=9;p.command=1;
-    p.commands[0]={1,state.actors[0].id,40,0,1};memory.combatReport.write(p);combat.tick(8,true);
+    p.commands[0]={1,state.actors[0].id,400,0,1};memory.combatReport.write(p);combat.tick(8,true);
     check(*reinterpret_cast<int*>(npcData.data()+0x130)==1 && *reinterpret_cast<int*>(npcData.data()+0x148)==0 &&
           fixturePostureCalls==1,"production dispatch uses HP and posture setters, preserves boss NoDeath");
     combat.tick(8,true);check(fixturePostureCalls==1,"acknowledged command never replays posture damage");
@@ -92,7 +105,7 @@ int main(){int n{};auto check=[&](bool b,const char*s){++n;if(!b)throw std::runt
     npcData[0x228]|=16;p.tick=GetTickCount64();p.command=3;p.commands[2]={3,state.actors[0].id,1,0,1};
     memory.combatReport.write(p);combat.tick(8,true);check(fixturePostureCalls==1,"NoPostureConsume is respected");
     npcData[0x228]=0;put(npcData,0x130,int(1000));
-    p.tick=GetTickCount64();p.command=4;p.commands[3]={4,state.actors[0].id,40,0,1};
+    p.tick=GetTickCount64();p.command=4;p.commands[3]={4,state.actors[0].id,400,0,1};
     memory.combatReport.write(p);combat.tick(8,true);
     check(*reinterpret_cast<int*>(npcData.data()+0x130)==1 && *reinterpret_cast<int*>(npcData.data()+0x25c)==2,
         "compatibility damage preserves a Boss node without native NoDeath bit");

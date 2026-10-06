@@ -54,7 +54,7 @@ inline bool validCombat(const CombatReport &p) {
            ((c.flags&1) && (sc::length(c.impact)>150000 || sc::length(c.direction)>1.01f)))return false;}
     return true;
 }
-// Damage is measured in vanilla MC health points (20 = one full native life).
+// Ratio deltas for the player; enemy damage uses its configurable MC health budget.
 inline int32_t damageHp(int32_t hp,int32_t maximum,double damage,double healing) {
     return int32_t(std::clamp(std::llround(double(hp)+(healing-damage)*maximum),0LL,int64_t(maximum)*1LL));
 }
