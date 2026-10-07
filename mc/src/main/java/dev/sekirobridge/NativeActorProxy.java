@@ -4,7 +4,7 @@ import net.minecraft.entity.damage.DamageSource;
 import net.minecraft.entity.mob.PathAwareEntity;
 import net.minecraft.world.World;
 /** Ephemeral invisible hit target; native physics alone supplies its position. */
-public final class NativeActorProxy extends PathAwareEntity implements NativeTerrainExcluded {
+public class NativeActorProxy extends PathAwareEntity implements NativeTerrainExcluded {
     long nativeId;int nativeFlags;long epoch,stage;
     public NativeActorProxy(EntityType<? extends PathAwareEntity> type,World world){super(type,world);
         setAiDisabled(true);setNoGravity(true);noClip=true;setPersistent();setSilent(true);}

@@ -119,7 +119,9 @@ int main() {
         bridge::InputPacket events;events.tick=1;events.epoch=7;events.sequence=2;
         events.events[0]={2,0,1,1,.25f,.75f};events.events[1]={2,0,0,1,.26f,.76f};
         check(bridge::validInput(events),"complete quick click and individual locations");
-        events.events[1].code=4;check(!bridge::validInput(events),"invalid mouse button rejected");
+        events.events[1].code=4;check(bridge::validInput(events),"second side mouse button is valid through JNI input validation");
+        events.events[0].code=3;check(bridge::validInput(events),"both side button codes fit the existing event ABI");
+        events.events[1].code=5;check(!bridge::validInput(events),"unsupported mouse button rejected");
         auto center=bridge::guiPosition(960,600,1920,1200,16.f/9);
         check(std::abs(center[0]-.5f)<.0001f && std::abs(center[1]-.5f)<.0001f,
             "GUI coordinates use real client size even when the render buffer differs");
@@ -134,6 +136,21 @@ int main() {
                 if(action)++presses;else ++releases;}
             check(presses==2 && releases==2,"a Windows double click remains two complete clicks");
         }
+        for(auto extra:{XBUTTON1,XBUTTON2}){
+            uint32_t button{},action{};unsigned presses{},releases{};
+            for(auto message:{WM_XBUTTONDOWN,WM_XBUTTONUP,WM_XBUTTONDBLCLK,WM_XBUTTONUP}){
+                check(bridge::mouseButtonEvent(message,button,action,MAKEWPARAM(MK_CONTROL|MK_XBUTTON1,extra)),
+                      "Windows side button edge is captured");
+                check(button==(extra==XBUTTON1?3u:4u),"high wParam selects GLFW side button despite modifier bits");
+                if(action)++presses;else ++releases;
+                check(bridge::consumedInputResult(message)==TRUE,"handled XBUTTON message returns Windows TRUE");
+            }
+            check(presses==2 && releases==2,"side double click preserves two separate press/release pairs");
+        }
+        uint32_t unusedButton{},unusedAction{};
+        check(!bridge::mouseButtonEvent(WM_XBUTTONDOWN,unusedButton,unusedAction,MAKEWPARAM(0,3)),
+              "unknown XBUTTON high word is rejected instead of aliasing a supported side key");
+        check(bridge::consumedInputResult(WM_LBUTTONDOWN)==0,"ordinary captured button return behavior is retained");
         check(bridge::terrainCellCenter(.01f)==bridge::terrainCellCenter(.49f) &&
               bridge::terrainCellCenter(-.01f)==bridge::terrainCellCenter(-.49f),
               "slope samples stay at fixed world cells while the player moves");

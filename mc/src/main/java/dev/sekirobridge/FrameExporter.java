@@ -1,7 +1,6 @@
 package dev.sekirobridge;
 
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gl.SimpleFramebuffer;
 import net.minecraft.client.gl.Framebuffer;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL15;
@@ -22,12 +21,13 @@ public final class FrameExporter implements AutoCloseable {
     }
     private final Slot[] slots = {new Slot(), new Slot(), new Slot()};
     private Slot current;
-    private SimpleFramebuffer scaled;
+    private final FrameCaptureTarget scaled = new FrameCaptureTarget();
+    private boolean reportedUnsupportedDepth;
     private int width, height;
     private long sequence;
     private long captured, lastPublishedCapture;
     public long published, dropped;
-    private static final class GLState implements AutoCloseable {
+    static final class GLState implements AutoCloseable {
         final int read = GL11.glGetInteger(GL30.GL_READ_FRAMEBUFFER_BINDING),
                   draw = GL11.glGetInteger(GL30.GL_DRAW_FRAMEBUFFER_BINDING);
         final int pack = GL11.glGetInteger(GL21.GL_PIXEL_PACK_BUFFER_BINDING),
@@ -93,12 +93,9 @@ public final class FrameExporter implements AutoCloseable {
             }
     }
     private void resize(int w, int h) {
-        if (w == width && h == height && scaled != null)
+        if (w == width && h == height)
             return;
         discard();
-        if (scaled != null)
-            scaled.delete();
-        scaled = new SimpleFramebuffer(w, h, true, MinecraftClient.IS_SYSTEM_MAC);
         width = w;
         height = h;
         for (var s : slots) {
@@ -108,13 +105,8 @@ public final class FrameExporter implements AutoCloseable {
             GL15.glBufferData(GL21.GL_PIXEL_PACK_BUFFER, (long)w * h * 12, GL15.GL_STREAM_READ);
         }
     }
-    private void copy(Framebuffer source, boolean depth) {
-        GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, source.fbo);
-        GL30.glBindFramebuffer(GL30.GL_DRAW_FRAMEBUFFER, scaled.fbo);
-        GL30.glBlitFramebuffer(0, 0, source.textureWidth, source.textureHeight, 0, 0, width, height,
-                               GL11.GL_COLOR_BUFFER_BIT | (depth ? GL11.GL_DEPTH_BUFFER_BIT : 0),
-                               GL11.GL_NEAREST);
-        GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, scaled.fbo);
+    private boolean copy(Framebuffer source, boolean depth) {
+        return scaled.copy(source.fbo, source.textureWidth, source.textureHeight, width, height, depth);
     }
     public void world() {
         if (!BridgeClient.active())
@@ -142,7 +134,17 @@ public final class FrameExporter implements AutoCloseable {
             current.width = width;
             current.height = height;
             var framebuffer = MinecraftClient.getInstance().getFramebuffer();
-            copy(framebuffer, true);
+            if (!copy(framebuffer, true)) {
+                current.pose = null;
+                current = null;
+                dropped++;
+                if (!reportedUnsupportedDepth) {
+                    BridgeClient.LOG.warn("MC frame capture requires a single-sample 2D depth attachment; frame discarded");
+                    reportedUnsupportedDepth = true;
+                }
+                return;
+            }
+            reportedUnsupportedDepth = false;
             GL15.glBindBuffer(GL21.GL_PIXEL_PACK_BUFFER, current.pbo);
             long plane = (long)width * height * 4;
             GL11.glReadPixels(0, 0, width, height, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, 0L);
@@ -165,7 +167,12 @@ public final class FrameExporter implements AutoCloseable {
                 current = null;
                 return;
             }
-            copy(MinecraftClient.getInstance().getFramebuffer(), false);
+            if (!copy(MinecraftClient.getInstance().getFramebuffer(), false)) {
+                current.pose = null;
+                current = null;
+                dropped++;
+                return;
+            }
             GL15.glBindBuffer(GL21.GL_PIXEL_PACK_BUFFER, current.pbo);
             GL11.glReadPixels(0, 0, width, height, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE,
                               (long)width * height * 8);
@@ -190,10 +197,7 @@ public final class FrameExporter implements AutoCloseable {
     }
     public void close() {
         discard();
-        if (scaled != null) {
-            scaled.delete();
-            scaled = null;
-        }
+        scaled.close();
         for (var s : slots)
             if (s.pbo != 0) {
                 GL15.glDeleteBuffers(s.pbo);

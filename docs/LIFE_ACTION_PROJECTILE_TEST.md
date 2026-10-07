@@ -1,5 +1,7 @@
 # Life, native actions and projectile repair
 
+Historical gameplay3 record: current local builds use M for grapple and no longer forward R to native attack/deathblow/resurrection. Use the MC death-screen button to resurrect. The older G/R instructions below describe the previous build and must not be used for the current patch; see SLASHBLADE_TEST.md.
+
 The paired host/JNI/Fabric build adds these changes. Offline checks do not establish real-game acceptance.
 
 * Death remains a connected GUI state. Click the first MC death-screen button (or press R) to send the native left attack/resurrection button. MC requests its respawn only after a fresh native living snapshot. The native hero identity changes on resurrection even if its address stays the same, rejecting pre-death damage and commands.

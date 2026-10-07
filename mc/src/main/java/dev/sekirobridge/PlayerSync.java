@@ -16,9 +16,11 @@ final class PlayerSync {
     private Object clientIdentity;
     private long clientEpoch;
     private boolean clientHandoff,serverHandoff;
+    private volatile boolean cinematicPositionPending;
     void client(Protocol.State s){
         var p=MinecraftClient.getInstance().player;if(p==null)return;
-        boolean handoff=(s.flags()&(Protocol.NATIVE_ACTION|Protocol.NATIVE_DEAD|Protocol.NATIVE_UI))!=0;
+        boolean handoff=(s.flags()&(Protocol.NATIVE_ACTION|Protocol.NATIVE_DEAD|Protocol.NATIVE_UI|Protocol.NATIVE_CINEMATIC))!=0;
+        if((s.flags()&Protocol.NATIVE_CINEMATIC)!=0)cinematicPositionPending=true;
         boolean initial=clientIdentity!=p || clientEpoch!=s.epoch();
         if(!initial && !handoff && !clientHandoff)return;
         clientHandoff=handoff;
@@ -39,8 +41,8 @@ final class PlayerSync {
             p.setNoGravity(false);p.noClip=false;
             p.teleport(p.getServerWorld(),s.mcX(s.px()),s.mcY(s.py()),s.mcZ(s.pz()),s.yaw(),s.pitch());p.setVelocity(Vec3d.ZERO);
         }
-        boolean handoff=(s.flags()&(Protocol.NATIVE_ACTION|Protocol.NATIVE_DEAD|Protocol.NATIVE_UI))!=0;
-        if(handoff || serverHandoff){
+        boolean handoff=(s.flags()&(Protocol.NATIVE_ACTION|Protocol.NATIVE_DEAD|Protocol.NATIVE_UI|Protocol.NATIVE_CINEMATIC))!=0;
+        if(handoff || serverHandoff || cinematicPositionPending){
             // The server's last received yaw may lag the live client camera.
             // Absolute position + zero relative rotation preserves that camera.
             p.networkHandler.requestTeleport(s.mcX(s.px()),s.mcY(s.py()),s.mcZ(s.pz()),0,0,
@@ -48,6 +50,8 @@ final class PlayerSync {
             p.setVelocity(Vec3d.ZERO);p.fallDistance=0;
         }
         serverHandoff=handoff;
+        if((s.flags()&Protocol.NATIVE_CINEMATIC)!=0){command=s.command();return;}
+        cinematicPositionPending=false;
         if(command!=s.command()){
             command=s.command();BlockPos target=BlockPos.ofFloored(p.getEyePos().add(p.getRotationVec(1).multiply(4)));
             if(p.getServerWorld().isInBuildLimit(target) && p.getServerWorld().isAir(target) &&
@@ -55,7 +59,7 @@ final class PlayerSync {
                 p.getServerWorld().setBlockState(target,Blocks.GRASS_BLOCK.getDefaultState());
         }
     }
-    void reset(){clientIdentity=null;clientEpoch=0;clientHandoff=false;NativeTerrain.clear();}
+    void reset(){clientIdentity=null;clientEpoch=0;clientHandoff=false;cinematicPositionPending=false;NativeTerrain.clear();}
     private void release(){if(owned!=null){owned.setNoGravity(oldGravity);owned.noClip=oldClip;owned.setVelocity(Vec3d.ZERO);
         if(owned.isAlive())owned.teleport(owned.getServerWorld(),originalPosition.x,originalPosition.y,originalPosition.z,originalYaw,originalPitch);owned=null;}serverHandoff=false;}
 }

@@ -56,7 +56,7 @@ public final class InputForwarder {
         public long guiGeneration(){return GuiIdentity.current();}
         public long cursorGeometry(){return GuiIdentity.current();}
         public void cancelPointer(){var mouse=(InputInvoker)client().mouse;mouse.bridgeActiveButton(-1);mouse.bridgePressTime(0);
-            for(int b=0;b<3;b++)KeyBinding.setKeyPressed(InputUtil.Type.MOUSE.createFromCode(b),false);}
+            for(int b=0;b<Protocol.MOUSE_BUTTONS;b++)KeyBinding.setKeyPressed(InputUtil.Type.MOUSE.createFromCode(b),false);}
         public void cursor(float x,float y){var c=client();
             ((InputInvoker)c.mouse).bridgeCursor(c.getWindow().getHandle(),
                 x*c.getWindow().getWidth(),y*c.getWindow().getHeight());}
@@ -94,6 +94,7 @@ public final class InputForwarder {
             case 161 -> GLFW.GLFW_KEY_RIGHT_SHIFT; case 17,162 -> GLFW.GLFW_KEY_LEFT_CONTROL;
             case 163 -> GLFW.GLFW_KEY_RIGHT_CONTROL; case 18,164 -> GLFW.GLFW_KEY_LEFT_ALT;
             case 165 -> GLFW.GLFW_KEY_RIGHT_ALT; case 27 -> GLFW.GLFW_KEY_ESCAPE;
+            case 20 -> GLFW.GLFW_KEY_CAPS_LOCK;
             case 32 -> GLFW.GLFW_KEY_SPACE; case 33 -> GLFW.GLFW_KEY_PAGE_UP;
             case 34 -> GLFW.GLFW_KEY_PAGE_DOWN; case 35 -> GLFW.GLFW_KEY_END;
             case 36 -> GLFW.GLFW_KEY_HOME; case 37 -> GLFW.GLFW_KEY_LEFT;
@@ -118,6 +119,7 @@ public final class InputForwarder {
         target.key(key,action,mods);
     }
     private void button(int code,int action,int mods){
+        if(code<0 || code>=Protocol.MOUSE_BUTTONS || (action!=0 && action!=1))return;
         int bit=1<<code;if(((buttons&bit)!=0)==(action!=0))return;
         buttons=action!=0?buttons|bit:buttons&~bit;
         target.button(code,action,mods);
@@ -140,7 +142,7 @@ public final class InputForwarder {
         long next=events.getLong(16),nx=events.getLong(24),ny=events.getLong(32);
         if(!initialized || epoch!=s.epoch()){
             release();initialized=true;epoch=s.epoch();eventSequence=next;dx=nx;dy=ny;textSequence=s.textSequence();pointerEventTick=0;}
-        boolean input=(s.flags()&Protocol.EDIT)!=0 && (s.flags()&(Protocol.MENU|Protocol.NATIVE_UI))==0;
+        boolean input=(s.flags()&Protocol.EDIT)!=0 && (s.flags()&(Protocol.MENU|Protocol.NATIVE_UI|Protocol.NATIVE_CINEMATIC))==0;
         boolean lookInput=input;
         boolean nativeAction=(s.flags()&Protocol.NATIVE_ACTION)!=0 && !target.screenOpen();
         if(nativeAction && (s.flags()&Protocol.NATIVE_GRAPPLE)==0)input=false;
@@ -150,15 +152,23 @@ public final class InputForwarder {
                 target.cancelPointer();buttons=0;pointerValid=false;
                 inputScreen=screen;inputGeometry=geometry;
             }
+            long first=Math.max(eventSequence,next-128);
             if(!input)releaseHeld();
             else if(!inputEnabled){
                 // Restore held movement/modifier levels after focus or F8. Do not
                 // turn a sampled button/key level into a second click/action.
-                for(int vk=8;vk<256;++vk)if(forwardedKey(vk) && s.key(vk) && (target.screenOpen() || (vk!='M' && vk!='R'))){
+                // A queued real key edge owns its state: pre-seeding that key
+                // would swallow a fresh DOWN (for example R on the resume tick).
+                boolean[] queuedKeys=new boolean[256];
+                for(long i=first;i<next;++i){
+                    int at=Protocol.INPUT_HEADER+(int)(i%128)*Protocol.INPUT_EVENT;
+                    int kind=events.getInt(at),code=events.getInt(at+4),action=events.getInt(at+8);
+                    if(kind==1 && code>=0 && code<256 && action>=0 && action<=2)queuedKeys[code]=true;
+                }
+                for(int vk=8;vk<256;++vk)if(!queuedKeys[vk] && forwardedKey(vk) && s.key(vk) && (target.screenOpen() || vk!='M')){
                     int key=glfwKey(vk);if(key!=GLFW.GLFW_KEY_UNKNOWN)pressed[vk]=key;}
             }
             inputEnabled=input;
-            long first=Math.max(eventSequence,next-128);
             if(next-eventSequence>128)releaseHeld();
             for(long i=first;i<next;++i){
                 int at=Protocol.INPUT_HEADER+(int)(i%128)*Protocol.INPUT_EVENT,kind=events.getInt(at),code=events.getInt(at+4),action=events.getInt(at+8);
@@ -166,7 +176,7 @@ public final class InputForwarder {
                 if(!input)continue;
                 long stamp=events.getLong(at+32),generation=events.getLong(at+40);
                 boolean pointerMatches=target.screenOpen() && generation!=0 && generation==target.guiGeneration() && Protocol.fresh(now,stamp);
-                if(kind==1){if(!target.screenOpen() && (code=='M' || code=='R'))continue;key(code,action,mods);}
+                if(kind==1){if(!target.screenOpen() && code=='M')continue;key(code,action,mods);}
                 else if(kind==2){pointerEventTick=Math.max(pointerEventTick,stamp);
                     if(target.screenOpen()){
                         float x=events.getFloat(at+16),y=events.getFloat(at+20);
@@ -189,7 +199,7 @@ public final class InputForwarder {
             // replay a click that was already fully consumed from the event ring.
             if(s.tickMs()>tick){
                 for(int vk=8;vk<256;++vk)if(!s.key(vk))key(vk,0,mods);
-                for(int b=0;b<3;++b)if((s.buttons()&(1<<b))==0)button(b,0,mods);
+                for(int b=0;b<Protocol.MOUSE_BUTTONS;++b)if((s.buttons()&(1<<b))==0)button(b,0,mods);
             }
             if(!target.screenOpen())
                 for(int vk=8;vk<256;++vk){int key=glfwKey(vk);
@@ -209,7 +219,7 @@ public final class InputForwarder {
             textSequence=s.textSequence();
         }finally{replaying=false;replayMods=-1;}
     }
-    private void releaseHeld(){for(int vk=8;vk<256;++vk)key(vk,0,0);for(int i=0;i<3;++i)button(i,0,0);}
+    private void releaseHeld(){for(int vk=8;vk<256;++vk)key(vk,0,0);for(int i=0;i<Protocol.MOUSE_BUTTONS;++i)button(i,0,0);}
     void release(){if(!initialized)return;
         try{replaying=true;releaseHeld();}finally{replaying=false;replayMods=-1;}initialized=false;inputEnabled=false;pointerValid=false;pointerScreen=null;}
 }

@@ -13,7 +13,7 @@ constexpr uint32_t magic = 0x31504253; // SBP1
 constexpr uint32_t version = 3, maxWidth = 1920, maxHeight = 1080;
 constexpr uint32_t maxPixels = maxWidth * maxHeight, slots = 3;
 constexpr uint32_t maxFrameBytes = maxPixels * 12;
-enum Flags : uint32_t { Scene = 1, Focus = 2, Edit = 4, Menu = 8, Reset = 16, NativeDead = 32, NativeAction = 64, NativeUI=128, NativeGrapple=256 };
+enum Flags : uint32_t { Scene = 1, Focus = 2, Edit = 4, Menu = 8, Reset = 16, NativeDead = 32, NativeAction = 64, NativeUI=128, NativeGrapple=256, NativeCinematic=512 };
 enum Capabilities : uint32_t {
     CameraSync = 1,
     Input = 2,
@@ -33,7 +33,7 @@ struct alignas(8) Control {
     std::array<uint8_t, 32> keys{}; // Windows VK bit set
     float mouseX{}, mouseY{};       // normalized client position
     int32_t wheel{};
-    uint32_t buttons{}; // left=1 right=2 middle=4
+    uint32_t buttons{}; // left=1 right=2 middle=4 X1=8 X2=16
     uint32_t command{}; // edge counted: test block request
     uint32_t reserved{};
     uint64_t textSequence{};

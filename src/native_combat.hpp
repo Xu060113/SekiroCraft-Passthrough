@@ -209,7 +209,8 @@ class NativeCombatAdapter {
             incoming_.known=true;incoming_.trajectory=true;}
     }
     int32_t incomingHp(uintptr_t data,int32_t requested)noexcept{
-        if(!defenseReady_ || bridgeVitalWriteDepth || paused_)return requested;
+        if(!defenseReady_ || bridgeVitalWriteDepth || paused_ ||
+           sc::readCinematic(base_,[](uintptr_t a,auto &v){return sc::readMemory(a,v);}).playing())return requested;
         std::unique_lock lock(mutex_,std::try_to_lock);if(!lock)return requested;
         auto now=GetTickCount64();Vital player;
         if(!combatActive_ || !fresh(now,controlAt_) || !fresh(now,report_.tick) || report_.hero!=heroId_ || report_.epoch!=epoch_ ||
@@ -263,7 +264,8 @@ class NativeCombatAdapter {
     void pause(bool on){paused_=on;}
     uint32_t nativeHitFailure()const{return nativeHit_.lastFailure();}
     void gameTick(uintptr_t manager,float dt)noexcept {
-        if(paused_ || !nativeHits() || !std::isfinite(dt) || dt<=0 || dt>.25f)return;
+        if(paused_ || !nativeHits() || !std::isfinite(dt) || dt<=0 || dt>.25f ||
+           sc::readCinematic(base_,[](uintptr_t a,auto &v){return sc::readMemory(a,v);}).playing())return;
         uintptr_t actual{};if(!sc::readMemory(base_+0x3d77ef0,actual) || actual!=manager || !actual)return;
         gameThreadCalls.fetch_add(1);
         std::unique_lock lock(mutex_,std::try_to_lock);if(!lock)return;

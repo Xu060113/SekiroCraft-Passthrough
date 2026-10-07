@@ -5,7 +5,8 @@ import java.nio.ByteOrder;
 
 public final class Protocol {
     public static final int CONTROL_BYTES = 200, META_BYTES = 112, INPUT_BYTES=6208, INPUT_HEADER=64, INPUT_EVENT=48, MAX_WIDTH = 1920, MAX_HEIGHT = 1080;
-    public static final int SCENE = 1, FOCUS = 2, EDIT = 4, MENU = 8, NATIVE_DEAD = 32, NATIVE_ACTION = 64, NATIVE_UI=128, NATIVE_GRAPPLE=256;
+    public static final int MOUSE_BUTTONS = 5;
+    public static final int SCENE = 1, FOCUS = 2, EDIT = 4, MENU = 8, NATIVE_DEAD = 32, NATIVE_ACTION = 64, NATIVE_UI=128, NATIVE_GRAPPLE=256, NATIVE_CINEMATIC=512;
     public record State(long sequence, long tickMs, long epoch, int flags, int capabilities, float px,
                         float py, float pz, float ex, float ey, float ez, float fx, float fy, float fz,
                         float fov, float aspect, float near, float far, float yOffset, float scale, int width,
@@ -27,7 +28,8 @@ public final class Protocol {
                 fov < 3.05 && aspect >= .7 && aspect <= 4 && near > 0 && far > near && far <= 100000;
         }
         public boolean active(long now) {
-            return valid() && fresh(now, tickMs) && (flags & (SCENE | FOCUS)) == (SCENE | FOCUS);
+            return valid() && fresh(now, tickMs) && (flags & (SCENE | FOCUS)) == (SCENE | FOCUS) &&
+                (flags & NATIVE_CINEMATIC)==0;
         }
         public boolean key(int vk) { return vk >= 0 && vk < 256 && (keys[vk / 8] & (1 << (vk % 8))) != 0; }
         public double mcX(double x) { return x * scale; }

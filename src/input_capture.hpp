@@ -94,7 +94,9 @@ template <int I> inline HRESULT STDMETHODCALLTYPE stateHook(void *device, DWORD 
         auto type = deviceType(device);
         if (type == DI8DEVTYPE_MOUSE && (size == sizeof(DIMOUSESTATE) || size == sizeof(DIMOUSESTATE2))) {
             auto mouse = static_cast<DIMOUSESTATE *>(out);
-            mouse->rgbButtons[0] = mouse->rgbButtons[1] = mouse->rgbButtons[2] = 0;
+            const size_t buttons=mcEdit.load(std::memory_order_relaxed)?
+                (size==sizeof(DIMOUSESTATE2)?5:4):3;
+            std::memset(mouse->rgbButtons,0,buttons);
             mouse->lZ = 0;
         } else if (type == DI8DEVTYPE_KEYBOARD && size == 256) {
             for (DWORD k = 0; k < 256; ++k)
@@ -142,7 +144,8 @@ inline HRESULT STDMETHODCALLTYPE dataHook(void *device, DWORD size, DIDEVICEOBJE
         DWORD type = deviceType(device), written = 0;
         for (DWORD i = 0; i < *count; ++i) {
             bool drop = type == DI8DEVTYPE_MOUSE &&
-                        (out[i].dwOfs >= DIMOFS_BUTTON0 && out[i].dwOfs <= DIMOFS_BUTTON2);
+                        (out[i].dwOfs >= DIMOFS_BUTTON0 && out[i].dwOfs <=
+                            (mcEdit.load(std::memory_order_relaxed)?DIMOFS_BUTTON4:DIMOFS_BUTTON2));
             drop = drop || (type == DI8DEVTYPE_MOUSE && out[i].dwOfs == DIMOFS_Z);
             drop = drop || (type == DI8DEVTYPE_KEYBOARD &&
                            ((mcEdit.load(std::memory_order_relaxed) && actionKey(out[i].dwOfs)) || flightKey(out[i].dwOfs)));

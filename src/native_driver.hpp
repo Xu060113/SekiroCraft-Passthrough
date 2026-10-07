@@ -19,6 +19,7 @@ class NativeDriver {
     std::atomic<bool> cameraEnabled_{};
     std::atomic<bool> hideNative_{};
     std::atomic<uint64_t> cameraEpoch_{}, controlTick_{};
+    std::atomic<uint64_t> minimumFrameSequence_{}, minimumPlayerTick_{};
     bool enabled_{}, installed_{}, rayReady_{};
     uint64_t retry_{}, terrainTick_{}, terrainSequence_{};
     uint64_t terrainEpoch_{};unsigned terrainPatch_{};bool outerPatch_{};
@@ -31,6 +32,7 @@ class NativeDriver {
         PlayerPacket next;
         if(memory_->player.read(next) && validPlayer(next))player_=next;
         return enabled_ && (player_.flags&1) && player_.epoch==control_.epoch &&
+            player_.controlTick>=minimumPlayerTick_ &&
             fresh(now,player_.tick,150) && fresh(now,player_.controlTick) &&
             sc::length(player_.position-sc::Vec3{control_.player[0],control_.player[1],control_.player[2]})<5;
     }
@@ -117,13 +119,17 @@ class NativeDriver {
     }
     void receiveFrame(std::shared_ptr<Frame> frame){cameraFrames_.receive(std::move(frame));}
     void takeCameraFrame(std::shared_ptr<Frame> &frame){cameraFrames_.takeDisplayed(frame);}
+    void presentationBarrier(uint64_t sequence,uint64_t tick){
+        minimumFrameSequence_=sequence;minimumPlayerTick_=tick;
+    }
     void update(const Control &c,bool enabled,bool hideNative=false){std::unique_lock lock(mutex_,std::try_to_lock);
         if(lock){control_=c;enabled_=enabled && ready();
             cameraEpoch_=c.epoch;controlTick_=c.tickMs;cameraEnabled_=enabled_;hideNative_=hideNative;}}
     bool target(sc::Vec3 &position,float *angle=nullptr) {
         std::unique_lock lock(mutex_,std::try_to_lock);if(!lock)return false;
         auto now=GetTickCount64();
-        if(!enabled_ || !fresh(now,control_.tickMs))return false;
+        if(!enabled_ || !fresh(now,control_.tickMs) ||
+           sc::readCinematic(base_,[](uintptr_t a,auto &v){return sc::readMemory(a,v);}).playing())return false;
         bool have=current(now);
         auto center=have?player_.position:sc::Vec3{control_.player[0],control_.player[1],control_.player[2]};
         auto epoch=control_.epoch;
@@ -141,6 +147,10 @@ class NativeDriver {
         return have;
     }
     void camera(uintptr_t camera) noexcept {
+        // Check on the native update thread, before Present has observed entry.
+        if(sc::readCinematic(base_,[](uintptr_t a,auto &v){return sc::readMemory(a,v);}).playing()){
+            cameraFrames_.applied({});return;
+        }
         uintptr_t field{},currentCamera{};
         if(!sc::readMemory(base_+0x3d5c0a0,field) || !sc::readMemory(field+0x30,currentCamera) || camera!=currentCamera)return;
         auto now=GetTickCount64();
@@ -155,7 +165,8 @@ class NativeDriver {
             }
         }
         auto frame=cameraFrames_.select(cameraEpoch_.load(),now);
-        if(!cameraEnabled_ || !fresh(now,controlTick_) || !frame){cameraFrames_.applied({});return;}
+        if(!cameraEnabled_ || !fresh(now,controlTick_) || !frame ||
+           frame->meta.hostSequence<minimumFrameSequence_){cameraFrames_.applied({});return;}
         const auto &m=frame->meta;
         auto pose=frameCameraPose(m);
         std::array<float,4> lens{m.fovY,m.aspect,m.nearZ,m.farZ};

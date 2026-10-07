@@ -7,8 +7,13 @@
 namespace bridge {
 constexpr uint32_t mcOwnerCapability = 256, terrainCapability = 512;
 constexpr size_t inputSlots = 128, terrainSide = 9;
+constexpr uint32_t mouseButtonCount = 5; // GLFW order: left/right/middle/X1/X2
 inline float terrainCellCenter(float value) { return std::floor(value * 2) * .5f + .25f; }
-inline bool mouseButtonEvent(UINT message, uint32_t &button, uint32_t &action) {
+inline bool extraMouseButtonMessage(UINT message) {
+    return message==WM_XBUTTONDOWN || message==WM_XBUTTONUP || message==WM_XBUTTONDBLCLK;
+}
+inline LRESULT consumedInputResult(UINT message) { return extraMouseButtonMessage(message)?TRUE:0; }
+inline bool mouseButtonEvent(UINT message, uint32_t &button, uint32_t &action, WPARAM data=0) {
     switch (message) {
     case WM_LBUTTONDOWN: case WM_LBUTTONDBLCLK: button=0;action=1;return true;
     case WM_LBUTTONUP: button=0;action=0;return true;
@@ -16,6 +21,11 @@ inline bool mouseButtonEvent(UINT message, uint32_t &button, uint32_t &action) {
     case WM_RBUTTONUP: button=1;action=0;return true;
     case WM_MBUTTONDOWN: case WM_MBUTTONDBLCLK: button=2;action=1;return true;
     case WM_MBUTTONUP: button=2;action=0;return true;
+    case WM_XBUTTONDOWN: case WM_XBUTTONUP: case WM_XBUTTONDBLCLK: {
+        auto extra=HIWORD(data);
+        if(extra!=XBUTTON1 && extra!=XBUTTON2)return false;
+        button=extra==XBUTTON1?3:4;action=message==WM_XBUTTONUP?0:1;return true;
+    }
     default: return false;
     }
 }
@@ -109,7 +119,7 @@ inline bool validInput(const InputPacket &p) {
         const auto &e=p.events[i%inputSlots];
         if (e.kind<1 || e.kind>4 || !std::isfinite(e.x) || !std::isfinite(e.y) ||
             (e.kind==1 && (e.code>=256 || e.action>2)) ||
-            (e.kind==2 && (e.code>2 || e.action>1)) || (e.mods & ~7u)) return false;
+            (e.kind==2 && (e.code>=mouseButtonCount || e.action>1)) || (e.mods & ~7u)) return false;
     }
     return true;
 }

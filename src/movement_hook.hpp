@@ -71,6 +71,10 @@ class NativeMovement {
     void sample(uintptr_t physics, float *candidate) noexcept {
         std::unique_lock lock(mutex_, std::try_to_lock); if (!lock) return;
         if(combat_)combat_->observe(physics);
+        if((control_.flags&NativeCinematic) ||
+           sc::readCinematic(base_,[](uintptr_t a,auto &v){return sc::readMemory(a,v);}).playing()){
+            releaseFlight();lastPhysics_=0;return;
+        }
         uintptr_t root{}, hero{}, owner{}, state{}, actualPhysics{};
         // Every callback may also be an NPC. It must match the current player's
         // owner and module, not a cached pointer from an earlier loading screen.

@@ -24,6 +24,13 @@ public final class ProtocolSelfTest {
                 "dimensions and UTF32 offsets");
         require(s.mcX(2) == 2 && s.mcY(2) == 130 && s.mcZ(2) == -2, "coordinate handedness and offset");
         require(Math.abs(Math.abs(s.yaw()) - 180) < .01 && s.pitch() == 0, "camera direction");
+        int oldFlags=bytes.getInt(24);
+        bytes.putInt(24,Protocol.SCENE|Protocol.FOCUS|Protocol.NATIVE_CINEMATIC);
+        require(Protocol.decode(bytes).valid() && !Protocol.decode(bytes).active(s.tickMs()),
+                "cinematic keeps a valid connection but suppresses presentation");
+        bytes.putInt(24,Protocol.SCENE|Protocol.FOCUS);
+        require(Protocol.decode(bytes).active(s.tickMs()),"native movie exit resumes normal activity");
+        bytes.putInt(24,oldFlags);
         require(!Protocol.fresh(5, 6) && Protocol.fresh(100, 90) && !Protocol.fresh(1000, 90),
                 "freshness matches host");
         bytes.putFloat(44, Float.NaN);

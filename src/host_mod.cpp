@@ -79,7 +79,7 @@ void recordInput(HWND hwnd,UINT msg,WPARAM w,LPARAM l) {
     if((msg==WM_KEYDOWN || msg==WM_SYSKEYDOWN || msg==WM_KEYUP || msg==WM_SYSKEYUP) && w<256) {
         e.kind=1;e.code=uint32_t(w);e.action=(msg==WM_KEYUP || msg==WM_SYSKEYUP)?0:((l&(1LL<<30))?2:1);
     } else {
-        if(bridge::mouseButtonEvent(msg,e.code,e.action)){
+        if(bridge::mouseButtonEvent(msg,e.code,e.action,w)){
             e.kind=2;
             auto p=guiPoint(hwnd,short(LOWORD(l)),short(HIWORD(l)));e.x=p.first;e.y=p.second;
         }
@@ -114,6 +114,8 @@ struct App {
     std::shared_ptr<bridge::Frame> cameraFrame, sceneFrame;
     bridge::DepthSnapshot sceneSnapshot;
     bridge::NativeSceneReadiness sceneReadiness;
+    sc::CinematicState cinematicState;
+    sc::CinematicGate cinematicGate;
     std::shared_ptr<bridge::Frame> snapshotFrame;
     sc::Camera snapshotCamera;
     uint64_t snapshotAt=UINT64_MAX;
@@ -206,8 +208,12 @@ struct App {
         recordingReverseDepth=reverseDepth;
         movement.tryInstall();
         driver.tryInstall();
+        cinematicState=host.cinematic();
+        bool cinematic=cinematicGate.update(cinematicState,GetTickCount64(),sequence+1);
+        driver.presentationBarrier(cinematicGate.minimumSequence(),cinematicGate.minimumTick());
         bool focused = GetForegroundWindow() == window;
-        if (focused) {
+        if(cinematic)for(int vk=VK_F6;vk<=VK_F9;++vk)pressed(vk);
+        if (focused && !cinematic) {
             if(pressed(VK_F6)){
                 if(!edit){edit=true;sc::input::nativeUI=false;}
                 else sc::input::nativeUI=!sc::input::nativeUI.load();
@@ -224,14 +230,15 @@ struct App {
         camera = c.value_or(sc::Camera{});
         auto vitals = host.vitals();
         bool dead=vitals.valid && vitals.hp==0;
-        bool scene = sceneReadiness.ready(player.valid,camera.valid,dead,frames);
+        bool scene = sceneReadiness.ready(player.valid,camera.valid,dead,frames) ||
+                     (cinematic && player.valid && (control.flags&bridge::Scene));
         bool nativeUI=sc::input::nativeUI.load() || !edit;
-        bool capturing = focused && (showMenu || (!nativeUI && scene && (mcStatus.load() & 2) != 0));
+        bool capturing = !cinematic && focused && (showMenu || (!nativeUI && scene && (mcStatus.load() & 2) != 0));
         bool mcOwner=scene && playerFeatures && driver.ready() && movement.installed() &&
                      movement.canFly() && (mcStatus.load() & 8)!=0;
-        bool actionAllowed=mcOwner && focused && edit && !showMenu && !nativeUI;
+        bool actionAllowed=mcOwner && !cinematic && focused && edit && !showMenu && !nativeUI;
         bool gameplay=actionAllowed && !dead && !(mcStatus.load()&2);
-        bool grapple=pressed('M'),attack=pressed('R');
+        bool grapple=pressed('M');
         bridge::NativeActionRequest request;
         bool requested=memory.nativeAction.read(request) && bridge::validAction(request) &&
             request.epoch==epoch && bridge::fresh(GetTickCount64(),request.tick) &&
@@ -239,22 +246,21 @@ struct App {
         if(requested){actionRequestSeen=request.sequence;actionRequestTick=request.tick;}
         auto now=GetTickCount64();
         auto animation=bridge::readNativeAnimation(host.base());
-        if((gameplay && (grapple || attack)) || (actionAllowed && dead && (attack || requested))){
-            bool accepted=dead || action.begin(now,animation,grapple && !attack);
-            if(accepted && (attack || requested))sc::input::attackUntil=now+180;
-            if(accepted && grapple)sc::input::grappleUntil=now+180;
-        }
-        action.update(now,animation,mcOwner && focused && !dead,nativeUI || showMenu);
+        if(gameplay && grapple && action.begin(now,animation,true))sc::input::grappleUntil=now+180;
+        // Only the MC death-screen button may synthesize native left click.
+        // R belongs to MC/mod keybindings; deathblow will use its own interface.
+        if(actionAllowed && dead && requested)sc::input::attackUntil=now+180;
+        action.update(now,animation,mcOwner && !cinematic && focused && !dead,nativeUI || showMenu);
         bool handoff=action.rootMotion();
-        combatTrace.animation(animation,(handoff?1u:0u)|(action.confirmed()?2u:0u)|(attack?4u:0u)|
+        combatTrace.animation(animation,(handoff?1u:0u)|(action.confirmed()?2u:0u)|
             (grapple?8u:0u)|(nativeUI?16u:0u)|(mcOwner?32u:0u));
         sc::input::nativeKeys=actionAllowed && (dead || action.active());
         if(!sc::input::nativeKeys){sc::input::attackUntil=0;sc::input::grappleUntil=0;}
-        sc::input::mcOwner=mcOwner && focused;
-        sc::input::capture = capturing || (mcOwner && focused && edit && !nativeUI);
-        sc::input::mcEdit = focused && scene && edit && !showMenu && !nativeUI && (mcStatus.load() & 1) != 0;
+        sc::input::mcOwner=mcOwner && !cinematic && focused;
+        sc::input::capture = capturing || (mcOwner && !cinematic && focused && edit && !nativeUI);
+        sc::input::mcEdit = !cinematic && focused && scene && edit && !showMenu && !nativeUI && (mcStatus.load() & 1) != 0;
         sc::input::flying = focused && scene && edit && !showMenu && movement.canFly() &&
-                            !nativeUI && (mcStatus.load() & 4) != 0;
+                            !cinematic && !nativeUI && (mcStatus.load() & 4) != 0;
         cursor(capturing);
         // Sekiro may hide its OS cursor again from another thread. Render a cursor
         // in the same final pass as the imported GUI, independent of ShowCursor.
@@ -263,10 +269,11 @@ struct App {
         control.tickMs = GetTickCount64();
         control.epoch = epoch;
         control.flags = (scene ? bridge::Scene : 0) | (focused ? bridge::Focus : 0) |
-                        (edit && !nativeUI ? bridge::Edit : 0) |
+                        (edit && !nativeUI && !cinematic ? bridge::Edit : 0) |
                         (showMenu ? bridge::Menu : 0) | (dead ? bridge::NativeDead : 0) |
                         (handoff ? bridge::NativeAction : 0) | (nativeUI?bridge::NativeUI:0) |
-                        (action.active() && action.grapple()?bridge::NativeGrapple:0);
+                        (action.active() && action.grapple()?bridge::NativeGrapple:0) |
+                        (cinematic?bridge::NativeCinematic:0);
         control.capabilities = 7 | (playerFeatures && movement.installed() ? bridge::constraintCapability : 0) |
                                (playerFeatures && movement.canFly() ? bridge::flightCapability : 0);
         if(playerFeatures && driver.ready() && movement.installed() && movement.canFly())
@@ -277,7 +284,7 @@ struct App {
             control.capabilities |= bridge::nativeDefenseCapability;
         std::fill(control.keys.begin(), control.keys.end(), 0);
         control.buttons = 0;
-        if (focused && !showMenu) {
+        if (focused && !showMenu && !cinematic) {
             for (int vk = 8; vk < 256; ++vk)
                 if (GetAsyncKeyState(vk) & 0x8000)
                     control.keys[vk / 8] |= uint8_t(1 << (vk % 8));
@@ -287,12 +294,16 @@ struct App {
                 control.buttons |= 2;
             if (GetAsyncKeyState(VK_MBUTTON) & 0x8000)
                 control.buttons |= 4;
+            if (GetAsyncKeyState(VK_XBUTTON1) & 0x8000)
+                control.buttons |= 8;
+            if (GetAsyncKeyState(VK_XBUTTON2) & 0x8000)
+                control.buttons |= 16;
         }
         control.wheel = pendingWheel.load();
         control.textSequence = textSequence.load();
         for (size_t i = 0; i < text.size(); ++i)
             control.text[i] = text[i].load();
-        if (scene) {
+        if (scene && camera.valid) {
             float playerValues[]{player.position.x, player.position.y, player.position.z};
             float eyeValues[]{camera.eye.x, camera.eye.y, camera.eye.z},
                 forwardValues[]{camera.forward.x, camera.forward.y, camera.forward.z};
@@ -311,6 +322,9 @@ struct App {
                 camera.projection.at(3, 2) = -p.at(3, 2);
             }
         }
+        else if(cinematic && player.valid){
+            control.player[0]=player.position.x;control.player[1]=player.position.y;control.player[2]=player.position.z;
+        }
         POINT point{};
         GetCursorPos(&point);
         ScreenToClient(window, &point);
@@ -326,14 +340,14 @@ struct App {
         }
         recordingAspect=control.aspect;
         memory.writeControl(control);
-        combat.pause(nativeUI || showMenu || !focused);
-        movement.update(control, playerFeatures && scene && !nativeUI && edit && (mcStatus.load() & 1) != 0,
-            playerFeatures && scene && (mcStatus.load()&1)!=0);
-        heroHidden=mcOwner && hideOriginal && host.avatarVisibility(true);
+        combat.pause(cinematic || nativeUI || showMenu || !focused);
+        movement.update(control, !cinematic && playerFeatures && scene && !nativeUI && edit && (mcStatus.load() & 1) != 0,
+            !cinematic && playerFeatures && scene && (mcStatus.load()&1)!=0);
+        heroHidden=mcOwner && !cinematic && hideOriginal && host.avatarVisibility(true);
         if(!heroHidden)host.avatarVisibility(false);
-        driver.update(control,mcOwner && !nativeUI && edit,heroHidden);
+        driver.update(control,mcOwner && !cinematic && !nativeUI && edit,heroHidden);
         combat.releaseIfInactive(mcOwner);
-        if (!scene || !focused || showMenu) {
+        if (cinematic || !scene || !focused || showMenu) {
             latest.store(nullptr);
             renderFrame.reset();
         }
@@ -343,6 +357,8 @@ struct App {
                     std::to_string(compositor.submitted) + " hud=" + std::to_string(compositor.overlaySubmitted) +
                     " peerBusy=" + std::to_string(statusBusy.load()) +
                     " presentBusy=" + std::to_string(skippedPresents.load()));
+            sc::log("cinematic="+std::to_string(cinematic)+" remoValid="+std::to_string(cinematicState.valid)+
+                    " remoStep="+std::to_string(cinematicState.step)+" remoNext="+std::to_string(cinematicState.next));
             sc::log("heroHidden=" + std::to_string(heroHidden) + " moveHook=" +
                     std::to_string(movement.installed()) + " playerCalls=" +
                     std::to_string(movement.playerCalls.load()) + " constrained=" +
@@ -390,7 +406,7 @@ struct App {
         ImGui::Text("F6 Sekiro UI / MC | F7 diagnostics / F8 input pause / F9 test block");
         auto animation=bridge::readNativeAnimation(host.base());
         ImGui::Text("Native animation=%d valid=%d | action=%d confirmed=%d",animation.id,animation.valid,action.active(),action.confirmed());
-        ImGui::Text("M: grapple only (Sekiro binding: %c) | R: attack / deathblow / resurrection",
+        ImGui::Text("M: grapple only (Sekiro binding: %c) | R: Minecraft / mod binding",
                     int(sc::input::grappleVk.load()));
         ImGui::Text("Sekiro: %s | camera: %s | depth: %s", player.valid ? "loaded" : "not loaded",
                     camera.valid ? "live" : "missing", sceneDepth ? "captured" : "missing");
@@ -472,16 +488,16 @@ LRESULT CALLBACK modWndProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         bool capture = sc::input::capture;
         if (capture && !(sc::input::nativeKeys && w==sc::input::grappleVk.load() && (msg==WM_KEYDOWN || msg==WM_KEYUP)) &&
             ((msg >= WM_KEYFIRST && msg <= WM_KEYLAST) || (msg >= WM_MOUSEFIRST && msg <= WM_MOUSELAST)))
-            return 0;
+            return bridge::consumedInputResult(msg);
     }
     if (guard.owns_lock())
         guard.unlock();
     if (sc::input::capture && !(sc::input::nativeKeys && w==sc::input::grappleVk.load() && (msg==WM_KEYDOWN || msg==WM_KEYUP)) &&
         ((msg >= WM_KEYFIRST && msg <= WM_KEYLAST) || (msg >= WM_MOUSEFIRST && msg <= WM_MOUSELAST)))
-        return 0;
+        return bridge::consumedInputResult(msg);
     if (sc::input::mcEdit) {
-        if ((msg >= WM_LBUTTONDOWN && msg <= WM_MBUTTONDBLCLK) || msg == WM_MOUSEWHEEL || msg == WM_CHAR)
-            return 0;
+        if ((msg >= WM_LBUTTONDOWN && msg <= WM_MBUTTONDBLCLK) || bridge::extraMouseButtonMessage(msg) || msg == WM_MOUSEWHEEL || msg == WM_CHAR)
+            return bridge::consumedInputResult(msg);
         if ((msg == WM_KEYDOWN || msg == WM_KEYUP) &&
             (w == 'I' || w == 'O' || w == 'J' || (w >= '1' && w <= '9')))
             return 0;
@@ -899,10 +915,12 @@ HRESULT STDMETHODCALLTYPE hookPresent(IDXGISwapChain *swap, UINT interval, UINT 
         auto now = GetTickCount64();
         auto currentFrame = [&](const auto &frame) {
             return frame && frame->meta.epoch == a.epoch && bridge::fresh(now, frame->meta.tickMs) &&
+                   a.cinematicGate.accepts(frame->meta.hostSequence) &&
                    bridge::fresh(now, frame->meta.controlTickMs);
         };
         std::string commonReason;
-        if (!(a.control.flags & bridge::Scene)) commonReason = "Native scene is not ready.";
+        if (a.control.flags & bridge::NativeCinematic) commonReason = "Sekiro cinematic owns presentation and input.";
+        else if (!(a.control.flags & bridge::Scene)) commonReason = "Native scene is not ready.";
         else if (!(a.control.flags & bridge::Focus)) commonReason = "Sekiro is not focused.";
         else if (a.showMenu) commonReason = "Diagnostics menu is open.";
         else if(a.control.flags&bridge::NativeUI)commonReason="Sekiro UI owns input (F6 returns to MC).";
@@ -942,10 +960,11 @@ HRESULT STDMETHODCALLTYPE hookPresent(IDXGISwapChain *swap, UINT interval, UINT 
                              : (overlaySubmitted ? "HUD displayed; world pending: " + a.worldReason
                                                  : "World: " + a.worldReason + " HUD: " + a.overlayReason);
         bool mcOwnsAvatar=(a.mcStatus.load()&9)==9 && (a.control.flags&bridge::Scene) &&
+                           !(a.control.flags&bridge::NativeCinematic) &&
                            (a.control.capabilities&bridge::mcOwnerCapability);
         a.heroHidden = mcOwnsAvatar && a.hideOriginal && a.host.avatarVisibility(true);
         if (!a.heroHidden) a.host.avatarVisibility(false);
-        a.hud();
+        if(!(a.control.flags&bridge::NativeCinematic))a.hud();
         ImGui::Render();
         {
             bridge::PipelineState restore(a.context.Get());

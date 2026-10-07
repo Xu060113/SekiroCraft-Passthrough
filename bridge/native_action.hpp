@@ -3,7 +3,7 @@
 namespace bridge {
 struct alignas(8) NativeActionRequest {
     uint64_t tick{},epoch{},sequence{};
-    uint32_t kind{},reserved{}; // 1: native attack/resurrection button
+    uint32_t kind{},reserved{}; // 1: native resurrection button; host accepts only while dead
 };
 static_assert(sizeof(NativeActionRequest)==32);
 inline bool validAction(const NativeActionRequest &p){return p.tick && p.epoch && p.sequence && p.kind==1 && !p.reserved;}

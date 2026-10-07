@@ -9,6 +9,7 @@ struct Device {
 };
 HRESULT response = S_OK;
 int nativeCalls{}, flushes{};
+DWORD returnedEvents=2;
 HRESULT STDMETHODCALLTYPE info(void *self, void *out) {
     auto &d = *static_cast<Device *>(self);
     auto size = *static_cast<DWORD *>(out);
@@ -30,7 +31,7 @@ HRESULT STDMETHODCALLTYPE data(void *, DWORD, DIDEVICEOBJECTDATA *, DWORD *n, DW
     if (SUCCEEDED(response) && n) {
         if (*n == INFINITE)
             ++flushes;
-        *n = 2;
+        *n = returnedEvents;
     }
     return response;
 }
@@ -99,9 +100,14 @@ int main() {
         device.type = DI8DEVTYPE_MOUSE;
         DIMOUSESTATE2 mouse{};
         check(sc::input::stateHook<0>(&device, sizeof(mouse), &mouse) == S_OK && mouse.rgbButtons[0] == 0 &&
-                  mouse.rgbButtons[1] == 0 && mouse.rgbButtons[2] == 0 && mouse.rgbButtons[3] == 0x80 &&
+                  mouse.rgbButtons[1] == 0 && mouse.rgbButtons[2] == 0 && mouse.rgbButtons[3] == 0 &&
+                  mouse.rgbButtons[4] == 0 && mouse.rgbButtons[5] == 0x80 &&
                   mouse.lX != 0 && mouse.lY != 0,
-              "MC actions isolated while native camera delta and extra buttons remain");
+              "MC five-button actions isolated while native camera delta and unsupported buttons remain");
+        struct {DIMOUSESTATE state{};uint32_t sentinel=0x12345678;} shortMouse;
+        check(sc::input::stateHook<0>(&device,sizeof(shortMouse.state),&shortMouse.state)==S_OK &&
+              shortMouse.state.rgbButtons[3]==0 && shortMouse.sentinel==0x12345678,
+              "four-button DIMOUSESTATE side capture does not overrun the native format");
         device.type = DI8DEVTYPE_KEYBOARD;
         std::array<unsigned char, 256> keyboard{};
         check(sc::input::stateHook<0>(&device, keyboard.size(), keyboard.data()) == S_OK &&
@@ -119,10 +125,14 @@ int main() {
         device.type = DI8DEVTYPE_MOUSE;
         events[0].dwOfs = DIMOFS_BUTTON0;
         events[1].dwOfs = DIMOFS_X;
+        events[2].dwOfs = DIMOFS_BUTTON3;
+        events[3].dwOfs = DIMOFS_BUTTON4;
+        returnedEvents=4;
         count = 4;
         check(sc::input::dataHook<0>(&device, sizeof(events[0]), events, &count, DIGDD_PEEK) == S_OK &&
                   count == 1 && events[0].dwOfs == DIMOFS_X && flushes == 2,
-              "buffered mouse filtering drains peeked actions");
+              "buffered five-button filtering drains peeked actions, including both side buttons");
+        returnedEvents=2;
         device.type = DI8DEVTYPE_JOYSTICK;
         check(sc::input::stateHook<0>(&device, bytes.size(), bytes.data()) == S_OK && bytes[0] == 0x80,
               "MC edit mode leaves gamepads untouched");

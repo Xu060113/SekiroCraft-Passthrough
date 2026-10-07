@@ -1,4 +1,4 @@
-param([string]$CompilerRoot)
+param([string]$CompilerRoot,[string]$SlashBladeJar)
 $ErrorActionPreference='Stop'
 $projectRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $workspaceRoot=[IO.Path]::GetFullPath((Join-Path $projectRoot '..\..'))
@@ -35,10 +35,28 @@ if(!$gsonJar){throw 'Gson dependency missing'}
 $verificationClasspath=(@($asmJars)+@($gsonJar.FullName)) -join ';'
 & java '-cp' $verificationClasspath "$projectRoot\tests\VanillaShield.java" $gameJar.FullName
 if($LASTEXITCODE){throw 'Vanilla shield direction checks failed'}
+& javac '-cp' "$verificationClasspath;$projectRoot\mc\build\classes\java\main" '-d' $buildRoot "$projectRoot\tests\VanillaVoid.java"
+if($LASTEXITCODE){throw 'Native canyon regression fixture build failed'}
+& java '-cp' "$verificationClasspath;$projectRoot\mc\build\classes\java\main;$buildRoot" 'dev.sekirobridge.VanillaVoid' $gameJar.FullName "$projectRoot\mc\build\classes\java\main\dev\sekirobridge\mixin"
+if($LASTEXITCODE){throw 'Native canyon void and health feedback checks failed'}
+$glJars=@(foreach($module in @('lwjgl','lwjgl-glfw','lwjgl-opengl')){
+    Get-ChildItem -LiteralPath "$projectRoot\.cache\gradle-home\caches\modules-2\files-2.1\org.lwjgl\$module\3.3.2" -Recurse -File -Filter '*.jar' |
+        Where-Object { $_.Name -eq "$module-3.3.2.jar" -or $_.Name -eq "$module-3.3.2-natives-windows.jar" } |
+        Select-Object -ExpandProperty FullName
+})
+if($glJars.Count -ne 6){throw 'Windows x64 LWJGL dependencies missing for hidden GL readback check'}
+$glClasspath=(@($glJars)+@("$projectRoot\mc\build\classes\java\main",$buildRoot)) -join ';'
+& javac '-cp' $glClasspath '-d' $buildRoot "$projectRoot\tests\FrameCaptureGl.java"
+if($LASTEXITCODE){throw 'GL readback regression fixture build failed'}
+& java '-cp' $glClasspath 'dev.sekirobridge.FrameCaptureGl'
+if($LASTEXITCODE){throw 'Production GL depth-format and readback regression failed'}
 & java '-cp' $verificationClasspath "$projectRoot\tests\MixinTargets.java" $gameJar.FullName "$projectRoot\mc\build\classes\java\main\dev\sekirobridge\mixin"
 if($LASTEXITCODE){throw 'Minecraft injection target verification failed'}
 $productionGame=Get-ChildItem -LiteralPath "$projectRoot\.cache\gradle-home\caches\fabric-loom\minecraftMaven\net\minecraft\minecraft-merged-intermediary" -Recurse -File -Filter '*.jar'|Select-Object -First 1
 $productionMod=Join-Path $projectRoot 'mc\build\libs\sekiro-minecraft-passthrough-0.1.0.jar'
 if(!$productionGame -or !(Test-Path -LiteralPath $productionMod)){throw 'Production game or remapped mod missing'}
+$proxyArgs=@($productionMod);if($SlashBladeJar){$proxyArgs+=$SlashBladeJar}
+& java '-cp' $verificationClasspath "$projectRoot\tests\SlashBladeTargets.java" @proxyArgs
+if($LASTEXITCODE){throw 'Production proxy / SlashBlade target checks failed'}
 & java '-cp' $verificationClasspath "$projectRoot\tests\MixinTargets.java" $productionGame.FullName $productionMod
 if($LASTEXITCODE){throw 'Production Minecraft injection target verification failed'}

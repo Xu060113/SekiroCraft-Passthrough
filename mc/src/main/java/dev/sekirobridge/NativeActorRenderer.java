@@ -8,12 +8,12 @@ import net.minecraft.client.render.VertexConsumerProvider;
 import net.minecraft.util.Identifier;
 
 /** Draw lodged arrows only; never draws a second character or the Wolf mesh. */
-final class NativeActorRenderer extends EntityRenderer<NativeActorProxy> {
+final class NativeActorRenderer<T extends NativeActorProxy> extends EntityRenderer<T> {
     private final ArrowEntityRenderer arrows;
     private ArrowEntity arrow;
     NativeActorRenderer(EntityRendererFactory.Context context){super(context);arrows=new ArrowEntityRenderer(context);}
-    @Override public Identifier getTexture(NativeActorProxy actor){return new Identifier("minecraft","textures/misc/white.png");}
-    @Override public void render(NativeActorProxy actor,float yaw,float delta,MatrixStack matrices,VertexConsumerProvider buffers,int light){
+    @Override public Identifier getTexture(T actor){return new Identifier("minecraft","textures/misc/white.png");}
+    @Override public void render(T actor,float yaw,float delta,MatrixStack matrices,VertexConsumerProvider buffers,int light){
         int count=Math.min(16,actor.getStuckArrowCount());if(count==0)return;
         if(arrow==null || arrow.getWorld()!=actor.getWorld())arrow=new ArrowEntity(actor.getWorld(),0,0,0);
         for(int i=0;i<count;++i){

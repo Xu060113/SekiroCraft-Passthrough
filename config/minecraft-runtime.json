@@ -1,0 +1,112 @@
+{
+  "formatVersion": 1,
+  "recordedOn": "2026-10-08",
+  "minecraft": "1.20.1",
+  "fabricLoader": "0.19.5",
+  "java": 21,
+  "bridgeMod": "0.1.0",
+  "protocol": 3,
+  "compileBaseline": {
+    "fabricLoader": "0.16.10",
+    "fabricApi": "0.92.2+1.20.1"
+  },
+  "mods": [
+    {
+      "id": "slashblade-refabricated",
+      "name": "SlashBlade: Refabricated",
+      "version": "1.20.1-1.4.0-Resharped-1.9.65",
+      "versionId": "a7m4w2ic",
+      "source": "https://github.com/Sh1roCu/SlashBlade-Refabricated",
+      "homepage": "https://modrinth.com/mod/slashblade-refabricated",
+      "versionUrl": "https://modrinth.com/mod/slashblade-refabricated/version/a7m4w2ic",
+      "filename": "SlashBlade-Refabricated-1.20.1-1.4.0-Resharped-1.9.65.jar",
+      "bytes": 7994600,
+      "sha1": "55c0b818e6abd0b6719e7c9ea57f20ea0ff0c42a",
+      "sha512": "51a138b983c27c2f7d28697689175028296a690be69d3c523694dd5f21b904a2ff2eebcf2748211de60933afb6214d766f6d92c7bcfcbbfafac384343aa918ea",
+      "sha256": "d0ff9df0249d179a979cf74534298eb4e9549ee1e973a659f52ade03a6e3e8c0",
+      "download": "https://cdn.modrinth.com/data/UggVUKPz/versions/a7m4w2ic/SlashBlade-Refabricated-1.20.1-1.4.0-Resharped-1.9.65.jar",
+      "dependencies": [
+        {
+          "version_id": null,
+          "project_id": "ohNO6lps",
+          "file_name": null,
+          "dependency_type": "required"
+        }
+      ]
+    },
+    {
+      "id": "tacz-refabricated",
+      "name": "TaCZ: Refabricated",
+      "version": "1.20.1-0.7.1-forge1.1.8-hotfix2",
+      "versionId": "3ShZi2cZ",
+      "source": "https://github.com/Sh1roCu/TACZ-Refabricated",
+      "homepage": "https://modrinth.com/mod/tacz-refabricated",
+      "versionUrl": "https://modrinth.com/mod/tacz-refabricated/version/3ShZi2cZ",
+      "filename": "TACZ-Refabricated-1.20.1-0.7.1-forge1.1.8-hotfix2.jar",
+      "bytes": 58010985,
+      "sha1": "798a491462b62c2add031804eb1f7ae5cf3c36ca",
+      "sha512": "e28303c334bd357c4168b7197675499c0c7d01a5c55bcce0915a5f622ecf9ed910ebb9a820e702153287a4f6d65b3c37b1990fcf65ffcce09775904be384d840",
+      "sha256": "e5ba9722e30e58d277698a5b7ef5668285fb6965b07b7e9837fcf40036eb1780",
+      "download": "https://cdn.modrinth.com/data/1j76DVHU/versions/3ShZi2cZ/TACZ-Refabricated-1.20.1-0.7.1-forge1.1.8-hotfix2.jar",
+      "dependencies": [
+        {
+          "version_id": null,
+          "project_id": "ohNO6lps",
+          "file_name": null,
+          "dependency_type": "required"
+        },
+        {
+          "version_id": null,
+          "project_id": "9s6osm5g",
+          "file_name": null,
+          "dependency_type": "optional"
+        }
+      ]
+    },
+    {
+      "id": "fabric-api",
+      "name": "Fabric API",
+      "version": "0.92.12+1.20.1",
+      "versionId": "rvI2dfzR",
+      "source": "https://github.com/FabricMC/fabric",
+      "homepage": "https://modrinth.com/mod/fabric-api",
+      "versionUrl": "https://modrinth.com/mod/fabric-api/version/rvI2dfzR",
+      "filename": "fabric-api-0.92.12+1.20.1.jar",
+      "bytes": 2137232,
+      "sha1": "3e9cdd3e2f827ca9a259df9eb8e31949437b6bd4",
+      "sha512": "de9da2344043b3e9ef9fb7dbfff5f2577b06000c4f73f2a37959a80123141169084cece19133bd299b45feaaa4648bdaca2ea085684888cc8c55cc9134a477ca",
+      "sha256": "4197ff4fbdac13cffccd267c1bc59e9fbabb2b5683a9d5f8023f4b5ea16a1c1e",
+      "download": "https://cdn.modrinth.com/data/P7dR8mSH/versions/rvI2dfzR/fabric-api-0.92.12%2B1.20.1.jar",
+      "dependencies": []
+    },
+    {
+      "id": "forge-config-api-port",
+      "name": "Forge Config API Port",
+      "version": "v8.0.3-1.20.1-Fabric",
+      "versionId": "HvR3IdRE",
+      "source": "https://github.com/Fuzss/forgeconfigapiport",
+      "homepage": "https://modrinth.com/mod/forge-config-api-port",
+      "versionUrl": "https://modrinth.com/mod/forge-config-api-port/version/HvR3IdRE",
+      "filename": "ForgeConfigAPIPort-v8.0.3-1.20.1-Fabric.jar",
+      "bytes": 396628,
+      "sha1": "41f146d16a37f62e84e60cab226058d1a87f9cec",
+      "sha512": "15144d6d7b74dfbe2eede6e3b0aa0c841670be1bd6121608bc28f3b1e46846ccd36b506060a081c988da96cf46fce8bf2e55601e3934b9a52d22dc2fa6cbfd32",
+      "sha256": "337a8f6c5ba48ef3b3da828f4f6a75d0552ba33f48ce97d3195befdb570e427a",
+      "download": "https://cdn.modrinth.com/data/ohNO6lps/versions/HvR3IdRE/ForgeConfigAPIPort-v8.0.3-1.20.1-Fabric.jar",
+      "dependencies": [
+        {
+          "version_id": null,
+          "project_id": "P7dR8mSH",
+          "file_name": null,
+          "dependency_type": "required"
+        },
+        {
+          "version_id": null,
+          "project_id": "5WeWGLoJ",
+          "file_name": null,
+          "dependency_type": "optional"
+        }
+      ]
+    }
+  ]
+}

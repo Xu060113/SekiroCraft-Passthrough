@@ -8,6 +8,7 @@
 #include "math.hpp"
 #include "owned_bit.hpp"
 #include "vitals.hpp"
+#include "cinematic.hpp"
 #include <windows.h>
 #include <bcrypt.h>
 #include <filesystem>
@@ -116,6 +117,9 @@ class GameHost {
     }
     bool supported() const { return supported_; }
     uintptr_t base() const { return supported_ ? base_ : 0; }
+    CinematicState cinematic() const {
+        return readCinematic(base(), [](uintptr_t address, auto &value) { return readMemory(address,value); });
+    }
     Vitals vitals() const {
         return readVitals(base_, supported_,
                           [](uintptr_t address, auto &value) { return readMemory(address, value); });

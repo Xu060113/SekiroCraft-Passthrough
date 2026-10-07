@@ -44,9 +44,9 @@ public final class BridgeClient implements ClientModInitializer {
     public static long handle() { return handle; }
     public static boolean keyHeld(int key){return INPUT.held(key);}
     public static boolean armed() { return armed && handle != 0; }
+    public static boolean cinematic(){var s=state;return s!=null && (s.flags()&Protocol.NATIVE_CINEMATIC)!=0;}
     public static boolean active() {
-        return connected() && Protocol.fresh(NativeBridge.clockMs(),state.tickMs()) &&
-            (state.flags()&Protocol.FOCUS)!=0;
+        return connected() && state.active(NativeBridge.clockMs());
     }
     public static boolean connected(){
         return handle != 0 && armed && state != null && state.valid() &&
@@ -78,6 +78,7 @@ public final class BridgeClient implements ClientModInitializer {
             FRAMES.discard();
         }
         boolean connected=connected();
+        NativeVoidProtection.refresh();
         if(!connected && wasConnected)PLAYERS.reset();
         wasConnected=connected;
         if(connected)NativeTerrain.poll(state);
@@ -102,6 +103,7 @@ public final class BridgeClient implements ClientModInitializer {
     }
     private static void disarm() {
         armed = false;
+        NativeVoidProtection.clear();
         wasConnected=false;
         PLAYERS.reset();renderPose=null;
         AudioBridge.release();CombatBridge.resetClient();
@@ -177,8 +179,8 @@ public final class BridgeClient implements ClientModInitializer {
                         }))));
         ClientTickEvents.START_CLIENT_TICK.register(c -> {
             poll();
+            if(connected())PLAYERS.client(state);
             if (active()) {
-                PLAYERS.client(state);
                 INPUT.update(state);
             }
         });
@@ -191,7 +193,7 @@ public final class BridgeClient implements ClientModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             CombatBridge.server(server);PLAYERS.server(server, connected() ? state : null);
         });
-        ServerLifecycleEvents.SERVER_STOPPING.register(server -> {CombatBridge.release();PLAYERS.server(server, null);});
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> {NativeVoidProtection.clear();CombatBridge.release();PLAYERS.server(server, null);});
         ClientLifecycleEvents.CLIENT_STOPPING.register(c -> {
             disarm();
             INPUT.release();

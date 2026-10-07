@@ -61,6 +61,7 @@ public final class InputForwarderSelfTest {
     public static void main(String[] args){run();}
     public static void run(){
         checks=0;
+        check(InputForwarder.glfwKey(20)==280,"installed gun mod's Caps Lock binding maps to the GLFW key code");
         var target=new Target();var input=new InputForwarder(target);
         input.update(control(100,Protocol.EDIT,0),packet(100,0),100);target.calls.clear();
 
@@ -149,7 +150,9 @@ public final class InputForwarderSelfTest {
         target.screen=false;input.update(control(240,Protocol.EDIT,0),packet(240,17),240);
         var nativeKeys=packet(250,19);event(nativeKeys,17,1,'M',1,0,0,0);event(nativeKeys,18,1,'R',1,0,0,0);
         input.update(control(250,Protocol.EDIT,0,'M','R'),nativeKeys,250);
-        check(!input.held('M') && !input.held('R'),"only M grapple and R finisher keys are reserved from Minecraft gameplay bindings");
+        check(!input.held('M') && input.held('R'),"only M grapple is reserved; R reaches Minecraft mod gameplay bindings");
+        check(target.calls.contains("key:82:1:0") && Boolean.TRUE.equals(target.levels.get(82)),
+            "R sends an actual key press callback and held level for gun mods");
         var action=packet(260,20);event(action,19,1,'W',1,0,0,0);
         action.putLong(24,5).putLong(32,2);target.calls.clear();
         input.update(control(260,Protocol.EDIT|Protocol.NATIVE_ACTION,0,'W'),action,260);
@@ -184,6 +187,65 @@ public final class InputForwarderSelfTest {
         nativeMenu.putLong(64+28*48+40,2).putLong(64+29*48+40,2);
         input.update(control(340,Protocol.EDIT|Protocol.NATIVE_UI,0),nativeMenu,340);
         check(target.presses(0)==0,"Sekiro UI ownership cannot click an underlying MC Screen");
+        target.calls.clear();var movie=packet(350,32).putLong(48,2);
+        event(movie,30,2,0,1,0,.5f,.5f);event(movie,31,2,0,0,0,.5f,.5f);
+        movie.putLong(64+30*48+40,2).putLong(64+31*48+40,2);
+        input.update(control(350,Protocol.EDIT|Protocol.NATIVE_CINEMATIC,0),movie,350);
+        check(target.presses(0)==0,"movie input cannot click an underlying MC inventory");
+        target.calls.clear();input.update(control(360,Protocol.EDIT,0),packet(360,32).putLong(48,2),360);
+        check(target.presses(0)==0,"movie clicks are consumed and never replay on exit");
+        input.release();target.screen=false;target.calls.clear();
+        var extraInput=new InputForwarder(target);
+        extraInput.update(control(1000,Protocol.EDIT,0),packet(1000,0),1000);target.calls.clear();
+        var reload=packet(1010,2);event(reload,0,1,'R',1,0,0,0);event(reload,1,1,'R',0,0,0,0);
+        extraInput.update(control(1009,Protocol.EDIT,0),reload,1010);
+        check(target.calls.equals(List.of("key:82:1:0","key:82:0:0")),"a quick R tap reaches gun event listeners once, even without a sampled hold");
+        target.calls.clear();extraInput.update(control(1010,Protocol.EDIT,0),reload,1010);
+        check(target.calls.isEmpty(),"rereading a reload packet cannot reload twice");
+        long next=2;
+        for(int side=3;side<=4;side++){
+            long stamp=1020+side;
+            var sideClick=packet(stamp,next+2);
+            event(sideClick,next,2,side,1,2,0,0);event(sideClick,next+1,2,side,0,2,0,0);next+=2;
+            target.calls.clear();extraInput.update(control(stamp-1,Protocol.EDIT,1<<side),sideClick,stamp);
+            check(target.presses(side)==1 && target.releases(side)==1,"both side buttons deliver press/release callbacks with event modifiers");
+            target.calls.clear();extraInput.update(control(stamp,Protocol.EDIT,1<<side),sideClick,stamp);
+            check(target.presses(side)==0 && target.releases(side)==0,"held side snapshot cannot repeat a completed action");
+        }
+        var sideDown=packet(1040,++next);event(sideDown,next-1,2,4,1,0,0,0);
+        extraInput.update(control(1040,Protocol.EDIT,16),sideDown,1040);target.calls.clear();
+        extraInput.update(control(1041,Protocol.EDIT,0),sideDown,1041);
+        check(target.releases(4)==1 && target.presses(4)==0,"new physical snapshot repairs a lost side-button release only");
+        var heldExtras=packet(1050,next+3);
+        event(heldExtras,next++,2,3,1,0,0,0);event(heldExtras,next++,2,4,1,0,0,0);event(heldExtras,next++,1,'R',1,0,0,0);
+        extraInput.update(control(1050,Protocol.EDIT,24,'R'),heldExtras,1050);target.calls.clear();
+        extraInput.update(control(1051,Protocol.EDIT|Protocol.NATIVE_UI,24,'R'),packet(1051,next),1051);
+        check(target.releases(3)==1 && target.releases(4)==1 && !extraInput.held('R'),"native menu handoff releases both side keys and R");
+        target.calls.clear();extraInput.update(control(1052,Protocol.EDIT,24,'R'),packet(1052,next),1052);
+        check(extraInput.held('R') && target.calls.stream().noneMatch(call->call.equals("key:82:1:0")) &&
+            target.presses(3)==0 && target.presses(4)==0,"resume restores R's level without manufacturing reloads or side actions");
+        extraInput.release();target.screen=true;target.generation=1;
+        extraInput.update(control(1060,Protocol.EDIT,0),packet(1060,next),1060);target.calls.clear();
+        var guiSide=packet(1070,next+2);event(guiSide,next++,2,3,1,0,.4f,.6f);event(guiSide,next++,2,3,0,0,.4f,.6f);
+        extraInput.update(control(1069,Protocol.EDIT,0),guiSide,1070);
+        check(target.presses(3)==1 && target.releases(3)==1 && target.x==.4f && target.y==.6f,
+            "GUI side clicks retain displayed generation and coordinates");
+        extraInput.release();target.screen=false;extraInput.update(control(1080,Protocol.EDIT,0),packet(1080,next),1080);
+        target.calls.clear();var invalidSide=packet(1090,next+2);
+        event(invalidSide,next++,2,5,1,0,0,0);event(invalidSide,next++,2,-1,1,0,0,0);
+        extraInput.update(control(1089,Protocol.EDIT,0),invalidSide,1090);
+        check(target.calls.isEmpty(),"invalid side-button codes cannot alias another held button");
+        var finalHold=packet(1100,next+2);event(finalHold,next++,2,3,1,0,0,0);event(finalHold,next++,2,4,1,0,0,0);
+        extraInput.update(control(1100,Protocol.EDIT,24),finalHold,1100);target.calls.clear();extraInput.release();
+        check(target.releases(3)==1 && target.releases(4)==1,"disconnect releases every owned side button");
+        var resumeTarget=new Target();resumeTarget.screen=false;
+        var resumeInput=new InputForwarder(resumeTarget);
+        resumeInput.update(control(2000,0,0),packet(2000,0),2000);resumeTarget.calls.clear();
+        var resumeReload=packet(2010,1);event(resumeReload,0,1,'R',1,0,0,0);
+        resumeInput.update(control(2010,Protocol.EDIT,0,'R'),resumeReload,2010);
+        check(resumeTarget.calls.contains("key:82:1:0"),"R pressed on the resume frame is not swallowed by held-level restoration");
+        check(resumeInput.held('R') && Boolean.TRUE.equals(resumeTarget.levels.get(82)),"resume-frame reload keeps its legitimate held state");
+        resumeInput.release();
         System.out.println("PASS "+checks+" production input replay checks");
     }
 }
