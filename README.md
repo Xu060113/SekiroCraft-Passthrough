@@ -34,6 +34,7 @@
   ```
 
 - 当前运行配置：**Minecraft Java Edition 1.20.1、Fabric Loader 0.19.5、Fabric API `0.92.12+1.20.1`**。启动器和 Fabric 配置需自行准备。
+- **Loader 版本建议：优先使用较新的稳定版，以提高 MC 端 Fabric 模组兼容性。** 保持 Minecraft 1.20.1，并选择满足所装模组依赖要求的 Loader，有助于减少因旧版加载器导致的加载问题；本项目当前运行参考版本为 **0.19.5**。源码编译基线与运行版本独立，实际兼容性仍以所装模组的版本要求和游戏测试为准。Fabric 官方安装指南也建议选择较新的 Loader，见 [官方安装建议](https://wiki.fabricmc.net/install#mojang_s_minecraft_launcher)。
 - 源码编译仍固定 Loader `0.16.10` 与 Fabric API `0.92.2+1.20.1` 的兼容基线；模组声明 Loader `>=0.16.10`、Minecraft `1.20.1`、Java `>=17`。编译版本与实际运行版本不同，升级 Loader/API 不代表支持其他 Minecraft 版本。
 - 构建需要 Git、Windows x64 JDK 21 和 PowerShell（推荐 PowerShell 7）。Java 字节码目标为 17。
 - 首次构建需要联网下载依赖。脚本固定 llvm-mingw `20260922`、Gradle `8.8`、Fabric Loom `1.6.12`。
