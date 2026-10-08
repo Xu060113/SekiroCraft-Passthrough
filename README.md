@@ -33,7 +33,8 @@
   637ACA527538C0EC6E1F136C8ED66046E95DFBDBB1F51926E134D9916398B856
   ```
 
-- Minecraft Java Edition 1.20.1，Fabric Loader 0.16.10，Fabric API `0.92.2+1.20.1`。启动器和 Fabric 配置需自行准备。
+- 当前运行配置：**Minecraft Java Edition 1.20.1、Fabric Loader 0.19.5、Fabric API `0.92.12+1.20.1`**。启动器和 Fabric 配置需自行准备。
+- 源码编译仍固定 Loader `0.16.10` 与 Fabric API `0.92.2+1.20.1` 的兼容基线；模组声明 Loader `>=0.16.10`、Minecraft `1.20.1`、Java `>=17`。编译版本与实际运行版本不同，升级 Loader/API 不代表支持其他 Minecraft 版本。
 - 构建需要 Git、Windows x64 JDK 21 和 PowerShell（推荐 PowerShell 7）。Java 字节码目标为 17。
 - 首次构建需要联网下载依赖。脚本固定 llvm-mingw `20260922`、Gradle `8.8`、Fabric Loom `1.6.12`。
 
@@ -72,7 +73,7 @@ GitHub 仓库提供源码，不包含游戏文件或预编译发行包。以下�
 
 先备份只狼存档和 MC 世界，正常退出两款游戏。关闭仍在运行的 Java/Gradle 进程后再执行更新器。
 
-1. 在启动器中建立专用的 `1.20.1 + Fabric 0.16.10` 配置，设置独立的**游戏目录**。它必须与下面 `$mcDir` 一致，不一定是启动器所在目录。
+1. 在启动器中建立专用的 `1.20.1 + Fabric 0.19.5` 配置，并安装 Fabric API `0.92.12+1.20.1`，设置独立的**游戏目录**。它必须与下面 `$mcDir` 一致，不一定是启动器所在目录。
 2. 在只狼设置中把钩索绑定为 M。
 3. 在刚刚克隆并构建的仓库根目录运行以下命令，替换两条路径：
 
@@ -91,6 +92,10 @@ GitHub 仓库提供源码，不包含游戏文件或预编译发行包。以下�
    ```
 
 `switch-sekiro.ps1` 检查游戏指纹、备份可识别的旧 DLL，并保存安装记录；遇到未知 `dinput8.dll` 会拒绝覆盖。`prepare-minecraft.ps1` 只复制模组，**不会安装启动器或 Fabric Loader**。更新器备份并校验 DLL/JAR，第二端写入失败时回滚；可能保存的只狼存档备份不代替用户自己的备份。
+
+当前源码构建包附带的是 Fabric API `0.92.2+1.20.1`。使用上述运行配置时，在 MC 关闭后，将准备脚本复制的旧 API 移到 `mods` 外的备份目录，再放入 [Fabric API 0.92.12+1.20.1](https://modrinth.com/mod/fabric-api/version/rvI2dfzR)，只保留一份 Fabric API。已升级的实例使用常规更新器更新桥接即可，不要重复执行首次准备脚本添加旧 API。
+
+Fabric Loader 0.19.5 通过启动器或 Fabric 安装器安装，不作为普通模组放入 `mods`。升级时保留 Minecraft 1.20.1、同一个游戏目录及个人世界；启动后在日志开头核对 Loader 0.19.5 和 API 0.92.12+1.20.1。
 
 不需要自动 Boss 阶段时，最后一条命令去掉 `-AutoBossPhases`。更新器每次根据本次参数设置该开关，后续更新要保留此参数才能继续启用。`-Diagnostic` 是定向排查选项，会开启记录及原生命中后端，日常运行无须开启。
 
