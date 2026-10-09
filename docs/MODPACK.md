@@ -1,6 +1,6 @@
 # 当前 Minecraft、Fabric 与模组配置
 
-2026-10-08 发布配置来自实际启动日志和已安装 JAR；第三方下载版本通过文件 SHA1 与原作者 Modrinth 发布记录核对。版本清单及 SHA256/SHA512 见 [minecraft-runtime.json](../config/minecraft-runtime.json)。这份配置是已运行的组合，不是所有新版模组均兼容的承诺。
+运行配置采集于 2026-10-08，来自实际启动日志和已安装 JAR；2026-10-09 更新沿用此配置。第三方下载版本通过文件 SHA1 与原作者 Modrinth 发布记录核对。版本清单及 SHA256/SHA512 见 [minecraft-runtime.json](../config/minecraft-runtime.json)，本轮桥接修复见 [更新日志](../CHANGELOG.md)。这份配置是已运行的组合，不是所有新版模组均兼容的承诺。
 
 | 组件 | 当前版本 | 安装位置或下载来源 |
 | --- | --- | --- |
@@ -17,8 +17,8 @@
 
 ## Release 中的文件
 
-- `SekiroCraft-Passthrough-0.1.0-20261008.zip`：成对的只狼 DLL、MC JAR、Fabric API 0.92.12、安装脚本、哈希清单和说明。解压后保留完整目录结构；根目录有 `scripts`、`dist` 和 `build/verification.json`，供安装器使用。
-- `SekiroCraft-Passthrough-0.1.0-20261008.mrpack`：MC 客户端环境配置，固定 Minecraft 1.20.1 和 Loader 0.19.5；包含桥接 JAR，通过原作者 CDN 下载表中的四个第三方模组并验证哈希。不包含只狼 DLL，仍需 ZIP 里的只狼端。
+- `SekiroCraft-Passthrough-0.1.0-20261009.zip`：成对的只狼 DLL、MC JAR、Fabric API 0.92.12、安装脚本、哈希清单和说明。解压后保留完整目录结构；根目录有 `scripts`、`dist` 和 `build/verification.json`，供安装器使用。
+- `SekiroCraft-Passthrough-0.1.0-20261009.mrpack`：MC 客户端环境配置，固定 Minecraft 1.20.1 和 Loader 0.19.5；包含桥接 JAR，通过原作者 CDN 下载表中的四个第三方模组并验证哈希。不包含只狼 DLL，仍需 ZIP 里的只狼端。
 - `sekiro-minecraft-passthrough-0.1.0.jar`：单独的桥接 JAR，便于已配置实例更新；必须与此次 Release 的 DLL 配套。
 - `SHA256SUMS.txt`：下载文件的 SHA256。
 

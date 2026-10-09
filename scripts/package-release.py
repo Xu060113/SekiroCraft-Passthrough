@@ -30,7 +30,7 @@ def write_zip(path, files):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fabric-api", type=Path, required=True)
-    parser.add_argument("--tag", default="v0.1.0-20261008")
+    parser.add_argument("--tag", default="v0.1.0-20261009")
     parser.add_argument("--authorized-on", help="Date of the user's publication authorization (YYYY-MM-DD)")
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
