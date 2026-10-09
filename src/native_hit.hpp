@@ -1,5 +1,6 @@
 #pragma once
 #include "sekirocraft/host.hpp"
+#include "sekirocraft/actor_model.hpp"
 #include "combat_trace.hpp"
 
 namespace bridge {
@@ -48,11 +49,13 @@ class NativeHitBackend {
             code(0x9f0410,std::array<uint8_t,11>{0x48,0x8b,0xc4,0x57,0x48,0x81,0xec,0xa0,0x00,0x00,0x00});
     }
     bool dispatch(uintptr_t attacker,uintptr_t target,const sc::Vec3 &from,const sc::Vec3 &to,
-                  int32_t maxHp,int32_t maxPosture,const DamageCommand &command,bool finish=false,int healthPoints=20)const {
+                  int32_t maxHp,int32_t maxPosture,const DamageCommand &command,bool finish=false,int healthPoints=20,
+                  const sc::ActorModelBody *body=nullptr)const {
         auto amount=command.amount;
         if(finish && !phaseReady()){failure_=7;return false;}
         if(!ready_ || !attacker || attacker==target || !sc::finite(from) || !sc::finite(to) ||
-           sc::length(to-from)>64 || maxHp<=0 || maxHp>10000000 || maxPosture<0 || maxPosture>10000000 ||
+           (body?!(command.flags&1) || !sc::modelHitInRange(*body,from,to,command.impact):sc::length(to-from)>64) ||
+           maxHp<=0 || maxHp>10000000 || maxPosture<0 || maxPosture>10000000 ||
            !std::isfinite(amount) || amount<=0 || amount>10000){failure_=1;return false;}
         auto module=damageModule(target);
         if(!module){failure_=2;return false;}
@@ -97,7 +100,7 @@ class NativeHitBackend {
             packet.put(0xd8,uint32_t(0x10200));packet.put(0xe0,0.f);
         }
         auto impact=(command.flags&1)?command.impact:to+sc::Vec3{0,1,0};
-        if(!sc::finite(impact) || sc::length(impact-to)>12){failure_=6;return false;}
+        if(!sc::finite(impact) || (!body && sc::length(impact-to)>12)){failure_=6;return false;}
         const std::array<float,4> position{impact.x,impact.y,impact.z,1.f};
         auto direction=(command.flags&1)?command.direction:sc::normalize(to-from);
         const std::array<float,4> normal{direction.x,direction.y,direction.z,0.f};

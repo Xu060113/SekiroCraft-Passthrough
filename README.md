@@ -6,7 +6,7 @@
 
 当前版本：`0.1.0`；补丁：`gameplay5-defense-render`；通信协议：`v3`。这是持续开发的版本，离线检查通过不代表所有场景和 Boss 都已完成实机验收。
 
-2026-10-08 更新包含剧情过场画面交接、拔刀剑首次命中、峡谷虚空误伤、R 换弹与鼠标侧键转发，以及 F5 人物显示的深度格式兼容修复。用户已运行游戏并授权发布；不同地图、Boss 和第三方模组仍需按文档回归。MC 自定义忍杀动作与结算接口目前处于 [方案设计](docs/MC_DEATHBLOW_DESIGN.md) 阶段，尚未替代自动扣红点。后续 GitHub 提交和推送仍需先经过用户游戏测试及上传授权。
+2026-10-09 更新包含大型 Boss 动画部位受击判定、拔刀剑加法剑气显示、再战强者传送加载保护及第一人称界面恢复入口，详见 [更新日志](CHANGELOG.md)。用户确认本轮游戏测试完成并授权同步；新增 HUD 恢复命令的单独实机记录及不同地图、Boss、第三方模组的覆盖情况见更新日志。MC 自定义忍杀动作与结算接口目前处于 [方案设计](docs/MC_DEATHBLOW_DESIGN.md) 阶段，尚未替代自动扣红点。后续 GitHub 提交和推送仍需先经过用户游戏测试及上传授权。
 
 可下载的桥接安装包和 MC 环境配置包见 [Releases](https://github.com/Xu060113/SekiroCraft-Passthrough/releases)。当前 **Fabric Loader 0.19.5 + Fabric API 0.92.12** 配置、模组的精确版本及原作者下载链接见 [MC 配置与模组](docs/MODPACK.md)。
 
@@ -19,9 +19,12 @@
 | 原生地面 | 采样附近地面，支持放置第一块方块、生物蛋以及附近 MC 实体的地面碰撞 |
 | 投射物 | MC 方块和实体命中保留；原生场景使用射线检测，敌人通过不可见 MC 代理接收命中 |
 | 战斗 | MC 近战、投射物、爆炸和敌对怪物可向附近原生敌人传递伤害；原生姿态和玩家 HP 参与同步 |
-| Boss 阶段 | 可选“血量耗尽自动扣一颗红点”的简化结算；不能保证特殊剧情阶段、忍杀演出及最终奖励正确 |
+| 大型敌人受击 | 主模型骨骼包围盒随动画更新，用于多部位射线、范围和距离判定；装配模型及特殊分离部件未全部覆盖，见 [受击框说明](docs/BOSS_HITBOX_TEST.md) |
+| 拔刀剑剑气 | 已核对的加法发光剑气可参与合成和地形遮挡；减法次元斩需单独适配，见 [剑气说明](docs/SWORD_EFFECT_TEST.md) |
+| Boss 阶段 | MC 桥接玩法建议开启“血量耗尽自动扣一颗红点”的简化结算；MC 忍杀动作与接口尚未实现，不能保证特殊剧情阶段、忍杀演出及最终奖励正确 |
 | 玩家状态 | 生存血条按原生 HP 比例同步；创造/旁观模式使用原生无伤害位；饥饿和复活次数不等价同步；已识别的敌人攻击由 MC 处理护甲、盾牌和吸收血 |
 | 峡谷低处 | 取消桥接角色与原生敌人代理因 MC 固定高度线产生的虚空误伤，原生死亡仍同步；见 [峡谷验收](docs/CANYON_VOID_TEST.md) |
+| 传送加载 | 再战强者及地图重载期间保留角色虚空保护、暂停移动与战斗回传；场景和出生位置稳定后重新同步，仍需按 [加载验收](docs/CANYON_VOID_TEST.md) 实机验证 |
 | 钩索 | MC 模式按 M 请求原生钩索，钩索位移反馈给 MC；普通跑跳和鼠标仍由 MC 控制，狼模型隐藏 |
 | 音效 | 由后台 Minecraft 播放真实 MC 音效 |
 | 菜单 | F6 在 MC 与只狼菜单输入之间切换，背包点击按所显示画面的坐标转发 |
@@ -39,6 +42,7 @@
   ```
 
 - 当前运行配置：Minecraft Java Edition **1.20.1**，Fabric Loader **0.19.5**，Fabric API **`0.92.12+1.20.1`**，Java 21。启动器和 Fabric 配置需自行准备。
+- **Loader 版本建议：优先使用较新的稳定版，以提高 MC 端 Fabric 模组兼容性。** 保持 Minecraft 1.20.1，并选择满足所装模组依赖要求的 Loader，有助于减少因旧版加载器导致的加载问题；本项目当前运行参考版本为 **0.19.5**。源码编译基线与运行版本独立，实际兼容性仍以所装模组的版本要求和游戏测试为准。Fabric 官方安装指南也建议选择较新的 Loader，见 [官方安装建议](https://wiki.fabricmc.net/install#mojang_s_minecraft_launcher)。
 - 源码编译仍固定 Loader `0.16.10` 与 Fabric API `0.92.2+1.20.1` 的兼容基线；`fabric.mod.json` 声明 Loader `>=0.16.10`、Minecraft `1.20.1`、Java `>=17`。运行配置升级不代表支持其他 MC 游戏版本或任意更新的 API。
 - 构建需要 Git、Windows x64 JDK 21 和 PowerShell（推荐 PowerShell 7）。Java 字节码目标为 17。
 - 首次构建需要联网下载依赖。脚本固定 llvm-mingw `20260922`、Gradle `8.8`、Fabric Loom `1.6.12`。
@@ -78,7 +82,9 @@ Git 仓库提供源码；[Releases](https://github.com/Xu060113/SekiroCraft-Pass
 
 先备份只狼存档和 MC 世界，正常退出两款游戏。关闭仍在运行的 Java/Gradle 进程后再执行更新器。
 
-1. 在启动器中建立专用的 `1.20.1 + Fabric 0.19.5` 配置，设置独立的**游戏目录**。它必须与下面 `$mcDir` 一致，不一定是启动器所在目录。也可以导入 Release 的 `.mrpack`，详见 [环境配置步骤](docs/MODPACK.md)。
+**当前建议安装者开启 Boss 自动扣红心（游戏中的 Boss 红点）模式。** MC 忍杀动作与结算接口尚未实现，因此使用 MC 战斗时，建议以“Boss 当前阶段血量耗尽后自动扣一颗红点”作为临时结算方式。该模式默认关闭，单独复制 DLL/JAR 不会启用；请保留下面更新命令中的 `-AutoBossPhases` 参数。
+
+1. 在启动器中建立专用的 `1.20.1 + Fabric 0.19.5` 配置，并安装 Fabric API `0.92.12+1.20.1`，设置独立的**游戏目录**。它必须与下面 `$mcDir` 一致，不一定是启动器所在目录。也可以导入 Release 的 `.mrpack`，详见 [环境配置步骤](docs/MODPACK.md)。
 2. 在只狼设置中把钩索绑定为 M。
 3. 在刚刚克隆并构建的仓库根目录运行以下命令，替换两条路径：
 
@@ -98,9 +104,13 @@ Git 仓库提供源码；[Releases](https://github.com/Xu060113/SekiroCraft-Pass
 
 `switch-sekiro.ps1` 检查游戏指纹、备份可识别的旧 DLL，并保存安装记录；遇到未知 `dinput8.dll` 会拒绝覆盖。`prepare-minecraft.ps1` 只复制模组，**不会安装启动器或 Fabric Loader**。更新器备份并校验 DLL/JAR，第二端写入失败时回滚；可能保存的只狼存档备份不代替用户自己的备份。
 
-源码构建包默认附编译基线的 Fabric API `0.92.2`；使用当前运行配置时，在关闭 MC 后将它替换为 [Fabric API 0.92.12+1.20.1](https://modrinth.com/mod/fabric-api/version/rvI2dfzR)，`mods` 中只保留一份 Fabric API。2026-10-08 的 Release 安装包已附 `0.92.12`，无需再替换。已升级的实例不要重复用首次准备脚本添加旧 API；正常更新器只替换桥接 DLL/JAR。
+源码构建包默认附编译基线的 Fabric API `0.92.2`；使用当前运行配置时，在关闭 MC 后将它替换为 [Fabric API 0.92.12+1.20.1](https://modrinth.com/mod/fabric-api/version/rvI2dfzR)，`mods` 中只保留一份 Fabric API。本次 Release 安装包已附 `0.92.12`，无需再替换。已升级的实例不要重复用首次准备脚本添加旧 API；正常更新器只替换桥接 DLL/JAR。
 
-不需要自动 Boss 阶段时，最后一条命令去掉 `-AutoBossPhases`。更新器每次根据本次参数设置该开关，后续更新要保留此参数才能继续启用。`-Diagnostic` 是定向排查选项，会开启记录及原生命中后端，日常运行无须开启。
+Fabric Loader 0.19.5 通过启动器或 Fabric 安装器安装，不作为普通模组放入 `mods`。升级时保留 Minecraft 1.20.1、同一个游戏目录及个人世界；启动后在日志开头核对 Loader 0.19.5 和 API 0.92.12+1.20.1。
+
+更新器每次根据**本次命令的参数**设置该模式，不会自动保留上次的开关：后续更新也必须带上 `-AutoBossPhases`，否则会重新关闭。启用后，只狼游戏目录中的 `sekirobridge.ini` 应包含 `native_hits=1` 和 `auto_boss_phases=1`；重启只狼后配置才会生效。请通过更新器切换模式，避免手动修改已安装文件导致哈希校验失败。`-Diagnostic` 是定向排查选项，日常运行无须开启。
+
+**不使用 MC 模组、恢复正常只狼玩法时，应关闭桥接及该简化结算模式，避免影响原生忍杀和操作。** 停用与恢复步骤见[下文](#停用与恢复)。
 
 **请保留原安装仓库及其 `runtime/installation.json`、备份目录和目录位置。** 记录含本地绝对路径，更换克隆目录、删除 `runtime` 或移动仓库可能影响更新和恢复。
 
@@ -129,6 +139,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File 'C:\Mods\SekiroCraft-Pas
 | WASD / Space / Shift / Ctrl | MC 移动 / 跳跃 / 潜行 / 疾跑（以 MC 当前键位为准） |
 | 双击 Space | 创造模式飞行；Space 上升，Shift 下降 |
 | E / Q / F / F5 | 背包 / 丢弃 / 换手 / 切换第一、第三人称 |
+| F1 | MC 原版隐藏/显示界面，同时影响第一人称手臂、准星和状态栏；背包不受影响 |
 | 1–9 / 滚轮 | 选择快捷栏 |
 | 左键 / 右键 | 挖掘或攻击 / 使用物品或放置 |
 | 鼠标中键 | 用户指定的枪械配置：开火和瞄准均用中键，以避开 MC 操作冲突；在 TaCZ 控制设置中自行绑定 |
@@ -157,11 +168,21 @@ git pull --ff-only
 & .\scripts\update-installed.ps1 -MinecraftDirectory 'C:\Games\Minecraft\SekiroCraft' -NativeGrappleKey M -AutoBossPhases
 ```
 
-DLL 与含 JNI 的 MC JAR 必须成对更新。不要手动混用不同提交的产物，也不要对已安装实例重复执行首次安装命令。更新器会检查安装记录和文件哈希；文件被手动修改时先核对原因，不要通过删除记录强行绕过。
+继续使用 MC 自动扣红点模式时，每次更新都保留 `-AutoBossPhases`。DLL 与含 JNI 的 MC JAR 必须成对更新。不要手动混用不同提交的产物，也不要对已安装实例重复执行首次安装命令。更新器会检查安装记录和文件哈希；文件被手动修改时先核对原因，不要通过删除记录强行绕过。
 
 ### 停用与恢复
 
-临时停用：在 MC 执行 `/sekirobridge off`。恢复只狼原 DLL：正常退出两款游戏后，在原仓库根目录执行：
+**正常玩只狼、不使用 MC 模组时，应停用桥接和自动扣红点模式。** 临时停止桥接，在 MC 执行 `/sekirobridge off`；F6 只切换菜单输入，F8 只暂停 MC 控制，不能代替停用。
+
+如果保留桥接安装但需要关闭自动扣红点，正常退出两款游戏，在**原安装仓库**运行下面命令，替换 MC 游戏目录；不要加 `-AutoBossPhases` 或 `-Diagnostic`：
+
+```powershell
+& .\scripts\update-installed.ps1 -MinecraftDirectory 'C:\Games\Minecraft\SekiroCraft' -NativeGrappleKey M
+```
+
+此命令将 `auto_boss_phases` 和 `native_hits` 均设为 `0`，下次启动只狼生效；它不会代替 `/sekirobridge off`。以后继续使用 MC 自动扣红点时，再按更新步骤带上 `-AutoBossPhases`。
+
+**只玩原版只狼时，推荐直接恢复原 DLL 和桥接配置。** 正常退出两款游戏后，在原仓库根目录执行；选择恢复时无需先运行上面的模式切换命令：
 
 ```powershell
 & .\scripts\switch-sekiro.ps1 -Action Restore -GameDirectory 'C:\Games\Sekiro'
@@ -188,13 +209,14 @@ DLL 与含 JNI 的 MC JAR 必须成对更新。不要手动混用不同提交的
 ## 注意事项与排查
 
 - **地形是局部近似。** 地面采样覆盖玩家附近约 6 米，缓存约 1.5 秒；没有完整墙顶、洞穴或多层地形碰撞。高速移动、巨大敌人及采样范围外实体可能穿透或失去支撑。
-- **Boss 自动扣红点是可选的实验功能。** 它在血量耗尽时尝试推进原生阶段；特殊脚本门槛、忍杀演出、最终奖励仍需逐个验证，不能把它当成完整原生战斗适配。
+- **MC 战斗建议开启 Boss 自动扣红点。** MC 忍杀尚未实现，该模式作为临时结算方案，默认关闭，需在安装及每次更新时指定 `-AutoBossPhases`。它在血量耗尽时尝试推进原生阶段；特殊脚本门槛、忍杀演出、最终奖励仍需逐个验证，不能把它当成完整原生战斗适配。不用 MC 模组时请按[停用与恢复](#停用与恢复)关闭，以免影响正常只狼操作。
 - **拔刀剑首次命中适配。** 原生敌方代理使用 MC `Monster` 类型，友方/中立 NPC 保留原类型，解决默认关闭友伤时只能攻击已受伤目标的问题；换版本后请按 [拔刀剑验收](docs/SLASHBLADE_TEST.md) 回归。R 已释放给 MC 模组；后续计划在原生红花确认后自动开始忍杀，当前尚未实现。
 - **钩索与相机交接仍需实机验收。** 当前读取原生动作状态、仅在确认钩索时跟随位移，不套用固定等待时间；史蒂夫没有只狼忍杀/钩索动作动画。
 - **存档与地图独立。** MC 方块由真实单人世界保存，不转换原创版本 SCW 存档。尚无地图或存档槽自动绑定，切换地图应单独校准。
 - **高度范围。** `sekirobridge.ini` 的 `y_offset` 默认为 128。桥接角色与原生代理不再因 MC 的固定虚空高度线误伤，但可放方块的高度仍受 MC 世界范围限制。修改偏移不会自动搬动已放置的方块。
 - **画面不可见/闪烁。** 用 F7 查看连接与提交状态，确认两端协议匹配、MC 在单人世界且桥接已开启。先在无其他渲染模组的 Fabric 实例复现，保留日志后正常退出。
 - **背包或只狼菜单点击无效。** 先用 F6 确认输入归属；检查是否误按 F8 暂停 MC 输入。报告当时界面、分辨率、缩放、操作步骤，避免仅描述“点不到”。
+- **第一人称手臂和状态栏同时消失，但方块与背包正常。** 先按 F1 检查是否启用了 MC 的隐藏界面开关；也可在 MC 执行 `/sekirobridge hud` 显式恢复状态栏与手部渲染，单独玩 MC 时也可使用。`/sekirobridge on` 会恢复可见界面，之后仍可用 F1 手动隐藏；状态命令会显示 `hudHidden` 和当前视角。若恢复后仍不可见，请区分 MC 窗口与只狼窗口的表现。
 - **无 MC 音效。** 检查 Windows 音量混合器中的 Java/Minecraft 和 MC 声音设置；声音来自后台 MC，不由只狼端播放。
 - **更新报游戏仍在运行。** 正常退出后检查 `sekiro`、`java`、`javaw`；更新器也会拒绝仍运行的 Gradle JVM，关闭相应进程后再试。
 - **不支持的只狼指纹。** 安装器会拒绝，不能仅修改哈希绕过；需要重新适配地址和机器码才能支持其他构建。
@@ -205,6 +227,9 @@ DLL 与含 JNI 的 MC JAR 必须成对更新。不要手动混用不同提交的
 
 | 文档 | 内容 |
 | --- | --- |
+| [CHANGELOG.md](CHANGELOG.md) | 本轮功能、修复、测试记录与保留的限制 |
+| [BOSS_HITBOX_TEST.md](docs/BOSS_HITBOX_TEST.md) | 大型敌人动画部位受击判定与回退行为 |
+| [SWORD_EFFECT_TEST.md](docs/SWORD_EFFECT_TEST.md) | 拔刀剑加法剑气的画面合成与遮挡 |
 | [MODPACK.md](docs/MODPACK.md) | 当前 Fabric 版本、模组下载、环境配置包与升级步骤 |
 | [F5_RENDER_TEST.md](docs/F5_RENDER_TEST.md) | 第三人称人物与枪械深度格式回归 |
 | [MOD_INPUT_TEST.md](docs/MOD_INPUT_TEST.md) | R 换弹、Caps Lock 与鼠标侧键 |

@@ -1,5 +1,6 @@
 #pragma once
 #include "sekirocraft/host.hpp"
+#include "sekirocraft/actor_shape.hpp"
 #include "../bridge/shared_memory.hpp"
 #include "combat_trace.hpp"
 #include "native_hit.hpp"
@@ -10,9 +11,9 @@ namespace bridge {
 // native hits drain only in the separately fingerprinted AttackManager update.
 class NativeCombatAdapter {
     struct Actor {uintptr_t chr{},data{},physics{};uint32_t handle{};uint64_t id{},seen{};
-        uint64_t stage{1},attemptedStage{};int32_t lastNode{-1},lastHp{-1};};
-    struct Vital {uintptr_t chr{},data{};uint32_t handle{};int32_t hp{},maxHp{},posture{},maxPosture{},bossNode{};uint8_t bits{};sc::Vec3 position{};uint8_t team{};};
-    uintptr_t base_{};SharedMemory *memory_{};bool ready_{},postureReady_{};
+        uint64_t stage{1},attemptedStage{};int32_t lastNode{-1},lastHp{-1};bool shapeLogged{};uint32_t partsLogged{};};
+    struct Vital {uintptr_t chr{},data{},physics{};uint32_t handle{};int32_t hp{},maxHp{},posture{},maxPosture{},bossNode{};uint8_t bits{};sc::Vec3 position{};uint8_t team{};};
+    uintptr_t base_{};SharedMemory *memory_{};bool ready_{},postureReady_{},shapesReady_{},partsReady_{};
     std::mutex mutex_; std::array<Actor,actorSlots> actors_{};
     uint64_t nextId_{},heroId_{},epoch_{},sequence_{},publishAt_{},session_{},ackCommand_{};
     uintptr_t hero_{},heroData_{}; uint32_t heroHandle_{};
@@ -59,6 +60,7 @@ class NativeCombatAdapter {
         else v.posture=v.maxPosture=0;
         int32_t nodes{};
         if(postureReady_ && sc::readMemory(v.data+0x25c,nodes) && nodes>=0 && nodes<=32)v.bossNode=nodes;
+        v.physics=physics;
         return v.maxHp>0 && v.maxHp<=10000000 && v.hp>=0 && v.hp<=v.maxHp;
     }
     bool resolves(uintptr_t chr,uint32_t handle)const {
@@ -66,6 +68,13 @@ class NativeCombatAdapter {
         if(!sc::readMemory(base_+0x3d7a1e0,root) || !sc::readMemory(root+0x10,list) ||
            !sc::readMemory(list+0x18,groups) || groups<0 || groups>1024)return false;
         return reinterpret_cast<Lookup>(base_+0xa4a050)(root,handle)==chr;
+    }
+    sc::ActorModelBody modelBody(const Vital &v)const {
+        if(!partsReady_)return {};
+        return sc::readActorModel(base_,v.chr,v.position,
+            [](uintptr_t at,auto &value){return sc::readMemory(at,value);},
+            [](uintptr_t at,void *destination,size_t bytes){SIZE_T got{};
+                return at>65536 && ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(at),destination,bytes,&got) && got==bytes;});
     }
     bool setHp(const Vital &v,int hp){Vital current;
         if(!resolves(v.chr,v.handle) || !read(v.chr,current) || current.data!=v.data ||
@@ -76,7 +85,7 @@ class NativeCombatAdapter {
         if((a.lastNode>=0 && a.lastNode!=v.bossNode) || (a.lastHp==0 && v.hp>0))++a.stage;
         a.lastNode=v.bossNode;a.lastHp=v.hp;
     }
-    bool finishDepletedStage(Actor &a,const Vital &player,const DamageCommand &cmd){
+    bool finishDepletedStage(Actor &a,const Vital &player,const DamageCommand &cmd,const sc::ActorModelBody *body=nullptr){
         Vital before;
         if(!autoBossPhases_ || !nodeReady_ || !resolves(a.chr,a.handle) || !read(a.chr,before) ||
            before.data!=a.data || before.handle!=a.handle || before.hp>1 || before.bossNode<=0 ||
@@ -84,7 +93,7 @@ class NativeCombatAdapter {
         a.attemptedStage=a.stage;
         // Prefer the engine's type-5 hit, which also runs its hit/SFX path.
         bool dispatched=nativeHit_.phaseReady() && nativeHit_.dispatch(player.chr,before.chr,
-            player.position,before.position,before.maxHp,before.maxPosture,cmd,true);
+            player.position,before.position,before.maxHp,before.maxPosture,cmd,true,20,body);
         if(dispatched)phaseDispatched.fetch_add(1);
         Vital after;
         if(!resolves(a.chr,a.handle) || !read(a.chr,after) || after.data!=before.data ||
@@ -128,13 +137,18 @@ class NativeCombatAdapter {
         for(auto seq=ackCommand_+1;seq<=report_.command;++seq){const auto &cmd=report_.commands[(seq-1)%damageSlots];
             bool success=false;
             for(auto &a:actors_)if(a.id==cmd.actor && a.chr && resolves(a.chr,a.handle)){
-                Vital v;if(read(a.chr,v) && v.data==a.data && v.handle==a.handle &&
-                   sc::length(v.position-player.position)<64 && (v.hp>0 || (native && v.bossNode>0)) && !(v.bits&8)){
+                Vital v;sc::ActorModelBody body;
+                bool valid=read(a.chr,v) && v.data==a.data && v.handle==a.handle;
+                if(valid)body=modelBody(v);
+                bool inRange=valid && (!body.parts.empty()?(cmd.flags&1) && sc::modelHitInRange(body,player.position,v.position,cmd.impact):
+                    sc::length(v.position-player.position)<64);
+                if(inRange && (v.hp>0 || (native && v.bossNode>0)) && !(v.bits&8)){
                     refreshStage(a,v);
                     if(cmd.stage!=a.stage){ackCommand_=seq;break;}
                     if(native){
-                        success=v.hp==0 || nativeHit_.dispatch(player.chr,v.chr,player.position,v.position,v.maxHp,v.maxPosture,cmd,false,healthPoints(v));
-                        if(success && autoBossPhases_)finishDepletedStage(a,player,cmd);
+                        auto parts=body.parts.empty()?nullptr:&body;
+                        success=v.hp==0 || nativeHit_.dispatch(player.chr,v.chr,player.position,v.position,v.maxHp,v.maxPosture,cmd,false,healthPoints(v),parts);
+                        if(success && autoBossPhases_)finishDepletedStage(a,player,cmd,parts);
                         Vital after;
                         bool remote=cmd.kind==1 || cmd.kind==2 || cmd.kind==3 || cmd.kind==5;
                         if(success && remote && phaseFinishes_ && read(a.chr,after) && resolves(a.chr,a.handle) &&
@@ -144,7 +158,7 @@ class NativeCombatAdapter {
                             if(a.stage==cmd.stage && a.attemptedStage!=a.stage && after.bossNode>0 &&
                                depleted && !(after.bits&12)){
                                 a.attemptedStage=a.stage;
-                                if(nativeHit_.dispatch(player.chr,after.chr,player.position,after.position,after.maxHp,after.maxPosture,cmd,true)){
+                                if(nativeHit_.dispatch(player.chr,after.chr,player.position,after.position,after.maxHp,after.maxPosture,cmd,true,20,parts)){
                                     phaseDispatched.fetch_add(1);Vital done;
                                     if(read(a.chr,done) && done.data==a.data && done.handle==a.handle && done.bossNode==after.bossNode-1){
                                         phaseConfirmed.fetch_add(1);refreshStage(a,done);
@@ -253,8 +267,25 @@ class NativeCombatAdapter {
             code(0xbd679a,std::array<uint8_t,8>{0x89,0x87,0x48,0x01,0x00,0x00,0x85,0xdb});
         nodeReady_=postureReady_ && code(0xb6e800,std::array<uint8_t,6>{0x89,0x91,0x5c,0x02,0x00,0x00});
         coreHpReady_=ready_ && code(0xb6e892,std::array<uint8_t,5>{0xe8,0xa9,0x64,0x06,0x00});
+        shapesReady_=ready_ &&
+            code(0xbbef20,std::array<uint8_t,9>{0xf3,0x0f,0x10,0x81,0xdc,0,0,0,0xc3}) &&
+            code(0xbbef30,std::array<uint8_t,9>{0xf3,0x0f,0x10,0x81,0xe0,0,0,0,0xc3}) &&
+            code(0xbc82a2,std::array<uint8_t,8>{0xf2,0x0f,0x11,0x81,0xdc,0,0,0}) &&
+            code(0xbc2e5f,std::array<uint8_t,8>{0xf3,0x0f,0x10,0x80,0x58,1,0,0}) &&
+            code(0xbc2e76,std::array<uint8_t,8>{0xf3,0x0f,0x10,0x80,0x5c,1,0,0});
+        sc::log("Native actor capsule signatures="+std::to_string(shapesReady_));
+        // The model constructor exposes its current 3x4 pose; the native AABB
+        // exporter binds FLVER bone boxes at +410 and transforms each 64-byte
+        // record with the corresponding 48-byte matrix. SHA gate is retained.
+        partsReady_=ready_ &&
+            code(0x8cff21,std::array<uint8_t,4>{0x48,0x8d,0x43,0x60}) &&
+            code(0xf327ff,std::array<uint8_t,14>{0x48,0x8d,0x85,0x10,0x04,0,0,0x49,0x89,0x87,0x10,0x01,0,0}) &&
+            code(0xf32c41,std::array<uint8_t,14>{0x48,0x63,0xc5,0x4c,0x8d,0x04,0x40,0x49,0xc1,0xe0,0x04,0x4d,0x03,0xc6});
+        sc::log("Native actor model-bone signatures="+std::to_string(partsReady_));
         sc::log("Native HP / posture signatures="+std::to_string(ready_)+"/"+std::to_string(postureReady_));}
     bool ready()const{return ready_;}
+    bool shapesReady()const{return shapesReady_;}
+    bool partsReady()const{return partsReady_;}
     bool postureReady()const{return postureReady_;}
     bool prepareNativeHits(){return ready_ && nativeHit_.initialize(base_);}
     void enableNativeHits(bool on){nativeHits_.store(on,std::memory_order_release);}
@@ -327,11 +358,15 @@ class NativeCombatAdapter {
         out.hp=player.hp;out.maxHp=player.maxHp;out.flags=1|(peer && report_.invulnerable?2:0)|(postureReady_?4:0);
         out.posture=player.posture;out.maxPosture=player.maxPosture;
         out.ackSession=session_;out.ackDamage=damage_;out.ackHeal=heal_;out.ackCommand=ackCommand_;
+        ActorShapes shapes;shapes.sequence=out.sequence;shapes.tick=now;shapes.epoch=epoch;
+        auto parts=std::make_unique<ActorParts>();parts->sequence=out.sequence;parts->tick=now;parts->epoch=epoch;
         if(active)for(auto &a:actors_){if(!a.chr)continue;
             // A stationary actor may stop receiving movement callbacks. Keep it
             // while the current handle table still resolves the same entity.
             if(!resolves(a.chr,a.handle)){a={};continue;}
-            Vital v;if(!read(a.chr,v) || v.data!=a.data || v.handle!=a.handle || sc::length(v.position-player.position)>64)continue;
+            Vital v;if(!read(a.chr,v) || v.data!=a.data || v.handle!=a.handle)continue;
+            auto model=modelBody(v);
+            if(model.parts.empty()?sc::length(v.position-player.position)>64:sc::modelDistance(model,player.position-v.position)>64)continue;
             refreshStage(a,v);
             auto &p=out.actors[out.count++];p.id=a.id;p.position=v.position;p.hp=v.hp;p.maxHp=v.maxHp;p.team=v.team;
             // EMEDF Enemy, StrongEnemy and hostile NPC teams; allies remain
@@ -341,8 +376,27 @@ class NativeCombatAdapter {
             p.flags=(hostile?1:0)|((v.bits&8)?2:0)|((v.bits&4)?4:0)|((v.bits&16)?8:0);
             p.posture=v.posture;p.maxPosture=v.maxPosture;p.bossNode=v.bossNode;
             p.stage=a.stage;
+            auto body=shapesReady_?sc::readActorBody(base_,v.chr,v.physics,
+                [](uintptr_t address,auto &value){return sc::readMemory(address,value);}):sc::ActorBody{};
+            auto &shape=shapes.actors[shapes.count++];shape={p.id,p.stage,body.width,body.height,body.yOffset,body.native?1u:0u};
+            if(!model.parts.empty()){
+                auto &entry=parts->actors[parts->count++];entry.id=p.id;entry.stage=p.stage;
+                entry.count=uint32_t(model.parts.size());entry.bones=model.bones;entry.source=model.source;
+                std::copy(model.parts.begin(),model.parts.end(),entry.parts.begin());
+                if(a.partsLogged!=model.source){a.partsLogged=model.source;uint32_t npc{};sc::readMemory(v.chr+0x68,npc);
+                    sc::log("Actor model parts id="+std::to_string(p.id)+" model="+std::to_string(npc)+
+                        " bones="+std::to_string(entry.bones)+" parts="+std::to_string(entry.count)+" source="+std::to_string(entry.source));}
+            }
+            if(!a.shapeLogged){a.shapeLogged=true;
+                uint32_t model{};sc::readMemory(v.chr+0x68,model);
+                sc::log("Actor hitbox id="+std::to_string(p.id)+" model="+std::to_string(model)+
+                    " native="+std::to_string(body.native)+" width="+std::to_string(body.width)+
+                    " height="+std::to_string(body.height)+" offset="+std::to_string(body.yOffset));}
         }
-        publishedActors=out.count;memory_->combatState.write(out);
+        publishedActors=out.count;
+        if(shapesReady_)memory_->actorShapes.write(shapes);
+        if(partsReady_)memory_->actorParts.write(*parts);
+        memory_->combatState.write(out);
     }
 };
 } // namespace bridge

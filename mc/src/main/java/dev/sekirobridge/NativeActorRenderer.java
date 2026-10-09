@@ -20,7 +20,11 @@ final class NativeActorRenderer<T extends NativeActorProxy> extends EntityRender
             float angle=(i*137.5f+actor.getId()*17)%360;
             arrow.setYaw(angle);arrow.prevYaw=angle;arrow.setPitch(-10);arrow.prevPitch=-10;
             double radians=Math.toRadians(angle);
-            matrices.push();matrices.translate(Math.sin(radians)*.18,.65+(i%5)*.18,Math.cos(radians)*.18);
+            var box=actor.getBoundingBox();
+            if(box instanceof NativeActorBounds body)box=body.parts().get(i%body.parts().size());
+            double radius=(box.maxX-box.minX)*.3;
+            matrices.push();matrices.translate((box.minX+box.maxX)*.5-actor.getX()+Math.sin(radians)*radius,
+                box.minY-actor.getY()+(box.maxY-box.minY)*(.36+(i%5)*.1),(box.minZ+box.maxZ)*.5-actor.getZ()+Math.cos(radians)*radius);
             arrows.render(arrow,angle,delta,matrices,buffers,light);matrices.pop();
         }
     }

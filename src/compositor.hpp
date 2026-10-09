@@ -175,7 +175,10 @@ float4 world(Out i):SV_TARGET {
     }
     float d=McDepth.SampleLevel(Point,frameUV(uv),0).r;
     if(!(d>=0&&d<.9999999)||!(t>0)||!(t<=zh+.015)) discard;
-    float4 color=World.SampleLevel(Point,frameUV(uv),0); clip(color.a-.005); return color;
+    float4 color=World.SampleLevel(Point,frameUV(uv),0);
+    // Additive MC glow has emission RGB and zero opaque coverage. It still needs
+    // valid MC depth and native occlusion above; a cleared background has neither.
+    clip(max(color.a,max(color.r,max(color.g,color.b)))-.005); return color;
 }
 float4 overlay(Out i):SV_TARGET{return World.SampleLevel(Point,frameUV(i.uv),0);}
 )";

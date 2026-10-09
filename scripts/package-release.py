@@ -31,6 +31,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fabric-api", type=Path, required=True)
     parser.add_argument("--tag", default="v0.1.0-20261008")
+    parser.add_argument("--authorized-on", help="Date of the user's publication authorization (YYYY-MM-DD)")
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
@@ -56,7 +57,7 @@ def main():
             raise RuntimeError(f"Asset differs from verified build: {name}")
         assets[name] = data
     assets[f"minecraft/{api['filename']}"] = api_bytes
-    for name in ("README.md", "THIRD_PARTY_NOTICES.md"):
+    for name in ("README.md", "THIRD_PARTY_NOTICES.md", "CHANGELOG.md"):
         assets[name] = (root / name).read_bytes()
     for document in sorted((root / "docs").glob("*.md")):
         assets[f"docs/{document.name}"] = document.read_bytes()
@@ -67,13 +68,13 @@ def main():
                     verifiedBuildBaseCommit=verified["sourceCommit"],
                     verifiedBuildWasDirty=verified["sourceDirty"],
                     runtime=runtime, releaseTag=args.tag,
-                    userPublicationAuthorizedOn=runtime["recordedOn"])
+                    userPublicationAuthorizedOn=args.authorized_on or runtime["recordedOn"])
     manifest["files"] = [{"name": name.replace("/", "\\"), "sha256": sha(data).upper()}
                          for name, data in sorted(assets.items())]
     folder = "SekiroCraft-Passthrough-" + args.tag.removeprefix("v")
     bundle = {f"{folder}/dist/SekiroCraft-Passthrough/{name}": data for name, data in assets.items()}
     for name, data in assets.items():
-        if name.startswith(("docs/", "scripts/", "config/")) or name in ("README.md", "THIRD_PARTY_NOTICES.md"):
+        if name.startswith(("docs/", "scripts/", "config/")) or name in ("README.md", "THIRD_PARTY_NOTICES.md", "CHANGELOG.md"):
             bundle[f"{folder}/{name}"] = data
         if name.endswith("-LICENSE.txt"):
             bundle[f"{folder}/licenses/{name}"] = data

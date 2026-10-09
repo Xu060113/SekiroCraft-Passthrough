@@ -282,6 +282,10 @@ struct App {
             control.capabilities |= bridge::combatCapability;
         if(playerFeatures && combat.defenseReady() && (control.capabilities & bridge::combatCapability))
             control.capabilities |= bridge::nativeDefenseCapability;
+        if(combat.shapesReady() && (control.capabilities & bridge::combatCapability))
+            control.capabilities |= bridge::actorShapesCapability;
+        if(combat.partsReady() && (control.capabilities & bridge::combatCapability))
+            control.capabilities |= bridge::actorPartsCapability;
         std::fill(control.keys.begin(), control.keys.end(), 0);
         control.buttons = 0;
         if (focused && !showMenu && !cinematic) {

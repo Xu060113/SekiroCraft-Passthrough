@@ -26,6 +26,10 @@ Actor records add opaque stage uint64 at 48. A stage advances on a native node c
 
 ## Historical v1 transport details
 
+### Native actor body extension
+
+Capability 4096 announces `Local\SekiroBridge-<channel>-actor-shapes-v1`, a separate zero-wait snapshot channel. Size 2080: sequence/tick/epoch at 0/8/16, count/reserved at 24/28; 64 entries of 32 bytes at 32. Each entry contains actor ID/stage at 0/8, width/height/model Y offset (native metres) at 16/20/24, source uint32 at 28 (0 human fallback, 1 validated current character capsule). Frame/control and combat-state-v3 sizes remain unchanged. Bounds must match the combat entity/stage/epoch and be <=250ms old. Scale applies to all three floats. The MC entity root remains the native root; its tracked bounds apply the model Y offset and travel identically to the server and client. This is an overall body AABB, not an animated per-bone hurtbox list. See `BOSS_HITBOX_TEST.md`.
+
 All integers and IEEE-754 floats use little endian. C++ layouts are statically asserted; Java uses explicit byte offsets and is checked against C++ binary fixtures. Win32 `GetTickCount64()` is the only time base, exposed through JNI to avoid mixing Java nanoTime with the host clock.
 
 Names: `Local\SekiroBridge-<channel>` and its `-lock` mutex. Channel names contain only ASCII letters, digits, hyphens or underscores, maximum 64 characters. Both participants create/open the same mapping, with a default user/session ACL. Use distinct channel names for additional pairs.
@@ -87,3 +91,9 @@ The MC snapshot carries separate immutable surface and known-cell maps. A valid 
 Wheel is cumulative, F9 command is edge counted, and UTF32 input is an eight-entry circular stream with a cumulative sequence. A peer reconnect initializes its input cursors to the latest state, releases previously owned key/button presses and avoids replaying old text or test-block requests. The bounded text ring may lose characters if the peer misses more than eight characters before reading again; IME composition forwarding is not implemented.
 
 Control.flags 的 256 为 NativeGrapple，表示 M 钩索请求或已确认的钩索跟随。只有已确认钩索位移才同时设置 NativeAction(64)。MC 收到这两个标志时继续保留 MC 按键和鼠标；该标志不改变 ABI v2 的布局。pending 请求期间 MC 仍拥有位置；原生临时释放重力抑制以恢复钩索资格，实际动画确认后才交出位移。
+
+## Animated native actor parts extension
+
+Capability 8192 advertises `actor-parts-v1`, independently of control/frame/combat v3 and capsule capability 4096. Size: 198688 bytes. Header: sequence/tick/epoch at 0/8/16, actor count/reserved at 24/28. Each of 64 actor records is 3104 bytes: ID/stage at 0/8; part count/bone count/source/reserved at 16/20/24/28; 128 min/max float XYZ pairs at 32, 24 bytes each. Parts are relative to the native physics root, bounded to +/-4096m; counts are <=128 parts, <=1024 bones. Source 1 is individual animated FLVER bone bounds, source 2 conservative grouping when over budget. Inverted unused bone boxes do not create parts. Invalid used geometry rejects the complete model snapshot. No native addresses are transported.
+
+MC accepts same epoch/ID/stage within 250ms, scales each part and reverses Z with min/max swapped. One atomic NBT DataTracker record delivers the same geometry to its client entity, including root-to-tracking-anchor translation. If the native root is over 32 MC metres from the player, the invisible proxy is anchored at the nearest actual body point to keep it in tracked chunks; all part world coordinates and the native actor identity remain unchanged. One entity per actor avoids per-bone damage duplication. A multipart Box retains narrow ray/intersection/distance semantics after common weapon operations; a side index extends world queries to limbs outside the root section. Native commands re-read the model and validate distance to a part and supplied body impact before dispatch. Missing/stale geometry falls back to the original capsule channel. This does not advertise triangle-accurate geometry, assembly-only meshes, detached scripted targets, altered Boss invulnerability or full special-Boss phase support.

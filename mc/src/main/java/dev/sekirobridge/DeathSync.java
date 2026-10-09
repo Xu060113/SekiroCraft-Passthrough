@@ -14,7 +14,7 @@ public final class DeathSync {
         NativeBridge.nativeAction(BridgeClient.handle(),packet);
     }
     static void tick(){
-        if(BridgeClient.connected() && BridgeClient.cinematic())return;
+        if(BridgeClient.loading() || (BridgeClient.connected() && BridgeClient.cinematic()))return;
         var c=MinecraftClient.getInstance();var p=c.player;var nativeState=CombatBridge.snapshot();
         if(!BridgeClient.connected() || p==null || p.isAlive()){requestedPlayer=null;return;}
         if(!(c.currentScreen instanceof DeathScreen) || nativeState==null || nativeState.hp()<=0 ||

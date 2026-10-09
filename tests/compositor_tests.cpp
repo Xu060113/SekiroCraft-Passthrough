@@ -13,7 +13,7 @@ void require(bool b, const char *label) {
         std::exit(1);
     }
 }
-int main() {
+int main(int argc, char **argv) {
     {
         bridge::RecordingGate gate;std::mutex present;std::atomic<int> recorded{};
         std::unique_lock busyPresent(present);
@@ -215,7 +215,44 @@ int main() {
     pixel = read();
     require(pixel[0] < 5 && pixel[1] < 5 && pixel[2] > 250,
             "empty MC background preserves the native image instead of blacking it out");
-    f.meta.sequence = empty.meta.sequence + 1;
+    auto glow = empty;
+    ++glow.meta.sequence;
+    for (int i = 0; i < 32 * 32; ++i) {
+        glow.pixels[i * 4] = 96;
+        glow.pixels[i * 4 + 1] = 48;
+        std::memcpy(glow.pixels.data() + plane + i * 4, &mcDepth, 4);
+    }
+    require(renderer.upload(c.Get(), glow), "upload depth-bearing sword emission with zero coverage");
+    c->ClearRenderTargetView(target.Get(), blue);
+    c->ClearDepthStencilView(dsv.Get(), D3D11_CLEAR_DEPTH,
+                            camera.projection.at(2,2) + camera.projection.at(3,2) / 5, 0);
+    require(renderer.draw(c.Get(), target.Get(), dsv.Get(), camera, 32, 32, false, false),
+            "sword emission composites against the paired native scene");
+    pixel = read();
+    require(pixel[0] >= 94 && pixel[0] <= 98 && pixel[1] >= 46 && pixel[1] <= 50 && pixel[2] > 250,
+            "sword glow adds to native color without darkening or covering the terrain");
+    c->ClearRenderTargetView(target.Get(), blue);
+    c->ClearDepthStencilView(dsv.Get(), D3D11_CLEAR_DEPTH,
+                            camera.projection.at(2,2) + camera.projection.at(3,2) / 2, 0);
+    require(renderer.draw(c.Get(), target.Get(), dsv.Get(), camera, 32, 32, false, false),
+            "sword emission uses native wall occlusion");
+    pixel = read();
+    require(pixel[0] < 5 && pixel[1] < 5 && pixel[2] > 250,
+            "sword glow behind a native wall remains invisible");
+    ++glow.meta.sequence;
+    for (int i = 0; i < 32 * 32; ++i) {
+        float cleared = 1;
+        std::memcpy(glow.pixels.data() + plane + i * 4, &cleared, 4);
+    }
+    require(renderer.upload(c.Get(), glow), "upload glow with missing depth to reproduce old color-only capture");
+    c->ClearRenderTargetView(target.Get(), blue);
+    c->ClearDepthStencilView(dsv.Get(), D3D11_CLEAR_DEPTH, 1, 0);
+    require(renderer.draw(c.Get(), target.Get(), dsv.Get(), camera, 32, 32, false, false),
+            "invalid sword depth still fails closed");
+    pixel = read();
+    require(pixel[0] < 5 && pixel[1] < 5 && pixel[2] > 250,
+            "depthless color is not flattened onto every native surface");
+    f.meta.sequence = glow.meta.sequence + 1;
     require(renderer.upload(c.Get(), f), "restore nonempty HUD fixture");
     camera.eye.x = 3;
     require(!renderer.draw(c.Get(), target.Get(), dsv.Get(), camera, 32, 32),
@@ -440,5 +477,24 @@ int main() {
     c->ClearRenderTargetView(target.Get(),blue);
     require(renderer.draw(c.Get(),target.Get(),dsv.Get(),camera,32,32,false,false),"compare contaminated attack effect depth");
     require(read()[2]>250,"contaminated original depth reproduces the old MC disappearance");
+    if (argc > 1) {
+        std::ifstream file(argv[1], std::ios::binary);
+        auto captured = empty;
+        captured.meta.sequence = paired.meta.sequence + 100;
+        file.read(reinterpret_cast<char *>(captured.pixels.data()), plane * 2);
+        require(file.gcount() == plane * 2, "load production GL-exported sword color/depth planes");
+        require(renderer.upload(c.Get(), captured), "upload real GL sword capture into D3D11 compositor");
+        for (float nativeZ : {5.f, 2.f}) {
+            c->ClearRenderTargetView(target.Get(), blue);
+            c->ClearDepthStencilView(dsv.Get(), D3D11_CLEAR_DEPTH,
+                camera.projection.at(2,2) + camera.projection.at(3,2) / nativeZ, 0);
+            require(renderer.draw(c.Get(), target.Get(), dsv.Get(), camera, 32, 32, false, false),
+                "compose actual GL sword emission against native depth");
+            auto actual = read();
+            require(nativeZ > 3 ? actual[0] >= 100 && actual[0] <= 104 && actual[1] >= 62 && actual[1] <= 66 && actual[2] > 250
+                               : actual[0] < 5 && actual[1] < 5 && actual[2] > 250,
+                "GL-to-D3D sword glow is visible in front and occluded behind native geometry");
+        }
+    }
     std::cout << checks << " D3D11 composite checks passed\n";
 }

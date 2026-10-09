@@ -24,6 +24,8 @@ public final class BridgeClient implements ClientModInitializer {
     private static volatile Protocol.State state;
     private static Protocol.State renderPose;
     private static boolean wasConnected;
+    private static volatile boolean nativeOwned;
+    private static final NativeLoadGate LOAD = new NativeLoadGate();
     private static float frameFov=Float.NaN;
     private static volatile boolean armed;
     private static Perspective previousPerspective;
@@ -41,14 +43,31 @@ public final class BridgeClient implements ClientModInitializer {
         return f;
     }
     public static float frameFov(){return Float.isFinite(frameFov)?frameFov:state.fov();}
+    private static void showHud(){
+        var client=MinecraftClient.getInstance();
+        client.options.hudHidden=false;
+        client.gameRenderer.setRenderHand(true);
+    }
     public static long handle() { return handle; }
     public static boolean keyHeld(int key){return INPUT.held(key);}
     public static boolean armed() { return armed && handle != 0; }
     public static boolean cinematic(){var s=state;return s!=null && (s.flags()&Protocol.NATIVE_CINEMATIC)!=0;}
+    public static boolean ownsNativePlayer(){var c=MinecraftClient.getInstance();
+        return armed() && nativeOwned && c.world!=null && c.world==worldIdentity && c.player!=null && c.getServer()!=null;
+    }
+    public static boolean loading(){var s=state;
+        // Server ticks may interleave between publishing a packet and updating
+        // the gate. The unavailable packet itself must already imply a hold.
+        return ownsNativePlayer() && (LOAD.holding() || s==null || !sceneAvailable() || !Protocol.fresh(NativeBridge.clockMs(),s.tickMs()));
+    }
+    static long loadRevision(){return LOAD.revision();}
     public static boolean active() {
         return connected() && state.active(NativeBridge.clockMs());
     }
     public static boolean connected(){
+        return !loading() && sceneAvailable();
+    }
+    private static boolean sceneAvailable(){
         return handle != 0 && armed && state != null && state.valid() &&
             NativeBridge.clockMs()>=state.tickMs() && NativeBridge.clockMs()-state.tickMs()<=1500 &&
             (state.flags()&Protocol.SCENE)!=0 &&
@@ -57,6 +76,7 @@ public final class BridgeClient implements ClientModInitializer {
     }
     public static void poll() {
         var client = MinecraftClient.getInstance();
+        boolean wasLoading=loading();
         if (client.world != worldIdentity) {
             worldIdentity = client.world;
             disarm();
@@ -73,13 +93,17 @@ public final class BridgeClient implements ClientModInitializer {
                 state = next;
             }
         }
+        boolean available=sceneAvailable();
+        if(available)nativeOwned=true;
+        LOAD.update(state,NativeBridge.clockMs(),ownsNativePlayer(),available && Protocol.fresh(NativeBridge.clockMs(),state.tickMs()));
+        if(loading()!=wasLoading)LOG.info("Native scene load {}: revision={} epoch={}",loading()?"held":"resumed",LOAD.revision(),state==null?0:state.epoch());
         if (!active()) {
             INPUT.release();
             FRAMES.discard();
         }
         boolean connected=connected();
         NativeVoidProtection.refresh();
-        if(!connected && wasConnected)PLAYERS.reset();
+        if(!connected && wasConnected && !ownsNativePlayer())PLAYERS.reset();
         wasConnected=connected;
         if(connected)NativeTerrain.poll(state);
         ProjectileTerrain.poll();
@@ -97,12 +121,13 @@ public final class BridgeClient implements ClientModInitializer {
         poll();
         renderPose=null;
         frameFov=Float.NaN;
-        if (connected())
+        if (ownsNativePlayer())
             PLAYERS.client(state);
         if(active())INPUT.update(state);
     }
     private static void disarm() {
         armed = false;
+        nativeOwned=false;LOAD.reset();
         NativeVoidProtection.clear();
         wasConnected=false;
         PLAYERS.reset();renderPose=null;
@@ -157,6 +182,7 @@ public final class BridgeClient implements ClientModInitializer {
                                 previousPerspective = client.options.getPerspective();
                             armed = true;
                             client.options.setPerspective(Perspective.FIRST_PERSON);
+                            showHud();
                             ctx.getSource().sendFeedback(
                                 Text.literal("Minecraft player controls armed: WASD / E inventory / Space jump / F5 view. " +
                                     "Requires the paired MC camera adapter; F8 pauses input; /sekirobridge off releases it."));
@@ -170,16 +196,22 @@ public final class BridgeClient implements ClientModInitializer {
                                 Text.literal("Bridge off; original controls restored."));
                             return Command.SINGLE_SUCCESS;
                         }))
+                        .then(literal("hud").executes(ctx -> {
+                            showHud();
+                            ctx.getSource().sendFeedback(Text.literal("Minecraft HUD and first-person hand rendering enabled. F1 toggles HUD visibility."));
+                            return Command.SINGLE_SUCCESS;
+                        }))
                         .then(literal("status").executes(ctx -> {
                             ctx.getSource().sendFeedback(
                                 Text.literal("JNI=" + (handle != 0) + " armed=" + armed +
-                                             " active=" + active() + " terrainReady=" + NativeTerrain.ready() +
+                                             " active=" + active() + " loading="+loading()+" terrainReady=" + NativeTerrain.ready() +
+                                             " hudHidden="+client.options.hudHidden+" view="+client.options.getPerspective()+
                                              " frames=" + FRAMES.published+" audio="+AudioBridge.status()+" combat="+CombatBridge.status()));
                             return Command.SINGLE_SUCCESS;
                         }))));
         ClientTickEvents.START_CLIENT_TICK.register(c -> {
             poll();
-            if(connected())PLAYERS.client(state);
+            if(ownsNativePlayer())PLAYERS.client(state);
             if (active()) {
                 INPUT.update(state);
             }
@@ -191,7 +223,7 @@ public final class BridgeClient implements ClientModInitializer {
             }
         });
         ServerTickEvents.END_SERVER_TICK.register(server -> {
-            CombatBridge.server(server);PLAYERS.server(server, connected() ? state : null);
+            CombatBridge.server(server);PLAYERS.server(server, ownsNativePlayer() ? state : null);
         });
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {NativeVoidProtection.clear();CombatBridge.release();PLAYERS.server(server, null);});
         ClientLifecycleEvents.CLIENT_STOPPING.register(c -> {

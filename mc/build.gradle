@@ -37,3 +37,13 @@ tasks.register('terrainTest', JavaExec) {
     classpath = sourceSets.main.output + sourceSets.main.compileClasspath
     mainClass = 'dev.sekirobridge.TerrainSelfTest'
 }
+tasks.register('actorShapeTest', JavaExec) {
+    dependsOn compileJava
+    classpath = sourceSets.main.output + sourceSets.main.compileClasspath
+    mainClass = 'dev.sekirobridge.ActorShapeSelfTest'
+}
+tasks.register('actorPartsTest', JavaExec) {
+    dependsOn compileJava
+    classpath = sourceSets.main.output + sourceSets.main.compileClasspath
+    mainClass = 'dev.sekirobridge.ActorPartsSelfTest'
+}

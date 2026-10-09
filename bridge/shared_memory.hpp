@@ -10,6 +10,8 @@
 #include "physics.hpp"
 #include "session.hpp"
 #include "combat.hpp"
+#include "actor_shapes.hpp"
+#include "actor_parts.hpp"
 #include "native_injury.hpp"
 #include "native_action.hpp"
 #include "projectile_rays.hpp"
@@ -59,6 +61,8 @@ class SharedMemory {
     SnapshotChannel<PlayerPacket> player;
     SnapshotChannel<TerrainPacket> terrain;
     SnapshotChannel<CombatState> combatState;
+    SnapshotChannel<ActorShapes> actorShapes;
+    SnapshotChannel<ActorParts> actorParts;
     SnapshotChannel<CombatReport> combatReport;
     SnapshotChannel<NativeInjuries> nativeInjuries;
     SnapshotChannel<NativeInjuryAck> nativeInjuryAck;
@@ -85,6 +89,8 @@ class SharedMemory {
         if (!physics.open(channel)) return false;
         if (!input.open(channel,L"input-v3") || !player.open(channel,L"player-v2") ||
             !terrain.open(channel,L"terrain-v2") || !combatState.open(channel,L"combat-state-v3") ||
+            !actorShapes.open(channel,L"actor-shapes-v1") ||
+            !actorParts.open(channel,L"actor-parts-v1") ||
             !combatReport.open(channel,L"combat-report-v2") || !nativeInjuries.open(channel,L"native-injuries-v1") ||
             !nativeInjuryAck.open(channel,L"native-injury-ack-v1") || !nativeAction.open(channel,L"native-action-v1") ||
             !projectileRays.open(channel,L"projectile-rays-v1") || !projectileHits.open(channel,L"projectile-hits-v1")) {close();return false;}
@@ -116,7 +122,8 @@ class SharedMemory {
     void close() {
         physics.close();
         input.close(); player.close(); terrain.close();
-        combatState.close();combatReport.close();
+        combatState.close();combatReport.close();actorShapes.close();
+        actorParts.close();
         nativeInjuries.close();nativeInjuryAck.close();
         nativeAction.close();
         projectileRays.close();projectileHits.close();

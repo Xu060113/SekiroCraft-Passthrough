@@ -70,13 +70,23 @@ int main(){int n{};auto check=[&](bool b,const char*s){++n;if(!b)throw std::runt
     const uint8_t postureCode[]{0x48,0x89,0x6c,0x24,0x18,0x48,0x89,0x74,0x24,0x20,0x57,0x48,0x83,0xec,0x20,0x41};
     const uint8_t postureStore[]{0x89,0x87,0x48,0x01,0x00,0x00,0x85,0xdb};
     std::memcpy(image.data()+0xbd6710,postureCode,16);std::memcpy(image.data()+0xbd679a,postureStore,8);
+    const uint8_t bodyHeight[]{0xf3,0x0f,0x10,0x81,0xdc,0,0,0,0xc3},bodyRadius[]{0xf3,0x0f,0x10,0x81,0xe0,0,0,0,0xc3};
+    const uint8_t bodyStore[]{0xf2,0x0f,0x11,0x81,0xdc,0,0,0};
+    const uint8_t paramHeight[]{0xf3,0x0f,0x10,0x80,0x58,1,0,0},paramRadius[]{0xf3,0x0f,0x10,0x80,0x5c,1,0,0};
+    std::memcpy(image.data()+0xbbef20,bodyHeight,9);std::memcpy(image.data()+0xbbef30,bodyRadius,9);
+    std::memcpy(image.data()+0xbc82a2,bodyStore,8);std::memcpy(image.data()+0xbc2e5f,paramHeight,8);std::memcpy(image.data()+0xbc2e76,paramRadius,8);
     std::vector<uint8_t> npc(0x2100),npcModules(0x80),npcData(0x280),npcPhysics(0x100),list(0x20);
     put(root,0x88,ptr(chr));put(root,0x10,ptr(list));put(list,0x18,int(1));
     put(npc,0,base+0x1000);put(npc,8,uint32_t(456));put(npc,0x1ff8,ptr(npcModules));put(npc,0x74,uint8_t(6));
     put(npcModules,0x18,ptr(npcData));put(npcModules,0x68,ptr(npcPhysics));put(npcPhysics,8,ptr(npc));
     put(npcPhysics,0x80,sc::Vec3{2,2,3});put(npcData,0x130,int(1000));put(npcData,0x134,int(1000));
     put(npcData,0x148,int(200));put(npcData,0x14c,int(200));put(npcData,0x25c,int(2));npcData[0x228]=4;
+    put(npcPhysics,0,base+0x2a89040);put(npcPhysics,0xdc,5.4f);put(npcPhysics,0xe0,1.5f);
     NativeCombatAdapter combat;combat.initialize(base,memory);check(combat.postureReady(),"validated production posture entry and store");
+    check(combat.shapesReady(),"native body reads require all independent geometry signatures");
+    image[0xbbef20]=0;NativeCombatAdapter noBody;noBody.initialize(base,memory);
+    check(noBody.ready() && !noBody.shapesReady(),"unexpected body getter disables only geometry, retains known combat ABI");
+    std::memcpy(image.data()+0xbbef20,bodyHeight,9);
     DWORD hpOld{},lookupOld{};
     check(VirtualProtect(image.data()+0xbd6000,4096,PAGE_EXECUTE_READWRITE,&hpOld) &&
           VirtualProtect(image.data()+0xa4a000,4096,PAGE_EXECUTE_READWRITE,&lookupOld),"executable native setter fixture");
@@ -88,6 +98,12 @@ int main(){int n{};auto check=[&](bool b,const char*s){++n;if(!b)throw std::runt
     combat.tick(8,true);combat.observe(ptr(npcPhysics));Sleep(80);combat.tick(8,true);
     check(memory.combatState.read(state) && state.count==1 && state.actors[0].posture==200 &&
           state.actors[0].bossNode==2 && (state.actors[0].flags&4),"boss counters and native NoDeath exported");
+    ActorShapes nativeBodies;
+    check(memory.actorShapes.read(nativeBodies) && validActorShapes(nativeBodies) && nativeBodies.count==1 &&
+          nativeBodies.sequence==state.sequence && nativeBodies.epoch==state.epoch &&
+          nativeBodies.actors[0].id==state.actors[0].id && nativeBodies.actors[0].stage==state.actors[0].stage &&
+          nativeBodies.actors[0].width==3 && nativeBodies.actors[0].height==5.4f && nativeBodies.actors[0].source==1,
+          "production adapter exports the observed Boss's real body with matching combat identity and tick");
     p={};p.tick=GetTickCount64();p.epoch=8;p.hero=state.hero;p.session=9;p.command=1;
     p.commands[0]={1,state.actors[0].id,400,0,1};memory.combatReport.write(p);combat.tick(8,true);
     check(*reinterpret_cast<int*>(npcData.data()+0x130)==1 && *reinterpret_cast<int*>(npcData.data()+0x148)==0 &&

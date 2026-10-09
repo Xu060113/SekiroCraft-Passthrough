@@ -110,6 +110,20 @@ JNIEXPORT jboolean JNICALL Java_dev_sekirobridge_NativeBridge_combatReport(JNIEn
     bridge::CombatReport p;std::memcpy(&p,ptr,sizeof(p));
     return bridge::validCombat(p) && reinterpret_cast<bridge::SharedMemory*>(handle)->combatReport.write(p);
 }
+JNIEXPORT jboolean JNICALL Java_dev_sekirobridge_NativeBridge_actorShapes(JNIEnv *env,jclass,jlong handle,jobject b) {
+    if(!handle || !b || env->GetDirectBufferCapacity(b)<jlong(sizeof(bridge::ActorShapes)))return false;
+    auto ptr=env->GetDirectBufferAddress(b);if(!ptr)return false;
+    bridge::ActorShapes p;
+    if(!reinterpret_cast<bridge::SharedMemory*>(handle)->actorShapes.read(p) || !bridge::validActorShapes(p))return false;
+    std::memcpy(ptr,&p,sizeof(p));return true;
+}
+JNIEXPORT jboolean JNICALL Java_dev_sekirobridge_NativeBridge_actorParts(JNIEnv *env,jclass,jlong handle,jobject b) {
+    if(!handle || !b || env->GetDirectBufferCapacity(b)<jlong(sizeof(bridge::ActorParts)))return false;
+    auto dst=env->GetDirectBufferAddress(b);if(!dst)return false;
+    auto packet=std::make_unique<bridge::ActorParts>();
+    if(!reinterpret_cast<bridge::SharedMemory*>(handle)->actorParts.read(*packet) || !bridge::validActorParts(*packet))return false;
+    std::memcpy(dst,packet.get(),sizeof(*packet));return true;
+}
 JNIEXPORT jboolean JNICALL Java_dev_sekirobridge_NativeBridge_nativeInjuries(JNIEnv *env,jclass,jlong handle,jobject b) {
     if(!handle || !b || env->GetDirectBufferCapacity(b)<jlong(sizeof(bridge::NativeInjuries)))return false;
     auto ptr=env->GetDirectBufferAddress(b);if(!ptr)return false;

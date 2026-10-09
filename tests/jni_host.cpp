@@ -22,6 +22,10 @@ int wmain(int argc, wchar_t **argv) {
     terrain.center={12,4,8};terrain.hits[40]=1;terrain.heights[40]=3.5f;
     bridge::CombatState combat;combat.sequence=1;combat.epoch=c.epoch;combat.hero=101;combat.hp=250;combat.maxHp=500;combat.flags=1;
     combat.count=1;combat.actors[0]={102,{12,4,8},200,400,6,1,0,0,0,1};
+    bridge::ActorShapes shapes;shapes.sequence=1;shapes.epoch=c.epoch;shapes.count=1;shapes.actors[0]={102,1,3,5.4f,.75f,1};
+    auto parts=std::make_unique<bridge::ActorParts>();parts->sequence=1;parts->epoch=c.epoch;parts->count=1;
+    auto &body=parts->actors[0];body.id=102;body.stage=1;body.count=2;body.bones=140;body.source=1;
+    body.parts[0]={{-.5f,0,-.5f},{.5f,2,.5f}};body.parts[1]={{79,7,-1},{81,9,1}};
     auto deadline = GetTickCount64() + 7000;
     bool projectileVerified=false,actionVerified=false,defenseVerified=false;
     while (GetTickCount64() < deadline) {
@@ -30,6 +34,8 @@ int wmain(int argc, wchar_t **argv) {
         input.tick=c.tickMs;terrain.tick=c.tickMs;
         m.input.write(input);m.terrain.write(terrain);
         combat.tick=c.tickMs;m.combatState.write(combat);
+        shapes.tick=c.tickMs;m.actorShapes.write(shapes);
+        parts->tick=c.tickMs;m.actorParts.write(*parts);
         bridge::NativeInjuries injuries;injuries.tick=c.tickMs;injuries.epoch=c.epoch;injuries.hero=101;injuries.session=103;injuries.produced=1;
         injuries.hits[0]={1,.25f,1,{12,4,8},0};m.nativeInjuries.write(injuries);
         bridge::NativeInjuryAck injuryAck;

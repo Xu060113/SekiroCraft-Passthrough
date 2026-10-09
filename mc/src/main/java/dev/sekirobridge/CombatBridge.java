@@ -28,6 +28,10 @@ public final class CombatBridge {
             .maxTrackingRange(32).trackingTickInterval(1).disableSaving().disableSummon().build("sekirobridge:native_enemy"));
     private static final ByteBuffer incoming=Protocol.direct(CombatProtocol.STATE_BYTES);
     private static volatile CombatProtocol.State state;
+    private static final ByteBuffer shapeIncoming=Protocol.direct(ActorShapeProtocol.BYTES);
+    private static volatile ActorShapeProtocol.State shapes;
+    private static final ByteBuffer partsIncoming=Protocol.direct(ActorPartsProtocol.BYTES);
+    private static volatile ActorPartsProtocol.State parts;
     private static volatile byte[] outgoing;
     private static final ByteBuffer defenseIncoming=Protocol.direct(NativeDefenseProtocol.BYTES);
     private static volatile NativeDefenseProtocol.State defenseState;
@@ -56,16 +60,28 @@ public final class CombatBridge {
     }
     /** JNI stays on the client thread; the server publishes immutable report bytes. */
     public static void poll(){
-        if(!usable()){state=null;return;}
+        if(!usable()){state=null;shapes=null;parts=null;return;}
         if(NativeBridge.combatState(BridgeClient.handle(),incoming)){
             var next=CombatProtocol.decode(incoming);
             if(next!=null && next.epoch()==BridgeClient.state().epoch() && Protocol.fresh(NativeBridge.clockMs(),next.tick()))state=next;
         }
+        if((BridgeClient.state().capabilities()&ActorShapeProtocol.CAPABILITY)!=0){
+            if(NativeBridge.actorShapes(BridgeClient.handle(),shapeIncoming)){
+                var next=ActorShapeProtocol.decode(shapeIncoming);
+                if(next!=null && next.epoch()==BridgeClient.state().epoch() && ActorShapeProtocol.fresh(NativeBridge.clockMs(),next.tick()))shapes=next;
+            }
+        }else shapes=null;
+        if((BridgeClient.state().capabilities()&ActorPartsProtocol.CAPABILITY)!=0){
+            if(NativeBridge.actorParts(BridgeClient.handle(),partsIncoming)){
+                var next=ActorPartsProtocol.decode(partsIncoming);
+                if(next!=null && next.epoch()==BridgeClient.state().epoch() && ActorShapeProtocol.fresh(NativeBridge.clockMs(),next.tick()))parts=next;
+            }
+        }else parts=null;
         if((BridgeClient.state().capabilities()&2048)!=0 && NativeBridge.nativeInjuries(BridgeClient.handle(),defenseIncoming)){
             var next=NativeDefenseProtocol.decode(defenseIncoming);
             if(next!=null && next.epoch()==BridgeClient.state().epoch() && Protocol.fresh(NativeBridge.clockMs(),next.tick()))defenseState=next;
         }
-        if(BridgeClient.cinematic())return; // Keep identity/ledger; never deliver gameplay during a movie.
+        if(BridgeClient.loading() || BridgeClient.cinematic())return; // Never deliver gameplay with an unavailable native pose.
         var ack=defenseAck;if(ack!=null){var buffer=Protocol.direct(ack.length);buffer.put(ack);buffer.putLong(0,NativeBridge.clockMs());
             NativeBridge.nativeInjuryAck(BridgeClient.handle(),buffer);}
         var bytes=outgoing;if(bytes!=null){var buffer=Protocol.direct(bytes.length);buffer.put(bytes);
@@ -87,7 +103,12 @@ public final class CombatBridge {
             source.isIn(net.minecraft.registry.tag.DamageTypeTags.IS_EXPLOSION)?3:
             direct instanceof net.minecraft.entity.projectile.ProjectileEntity?5:
             attacker instanceof MobEntity?4:0;
-        var point=direct instanceof net.minecraft.entity.projectile.ProjectileEntity?direct.getPos():target.getBoundingBox().getCenter();
+        var bounds=target.getBoundingBox();
+        var origin=direct!=null?direct.getPos():attacker!=null?attacker.getEyePos():bounds.getCenter();
+        // Mod projectiles can call damage from the tick before exact contact.
+        // Send the nearest actual body point, never the union's empty centre.
+        var point=bounds instanceof NativeActorBounds body?body.nearestPoint(origin):
+            direct instanceof net.minecraft.entity.projectile.ProjectileEntity?direct.getPos():bounds.getCenter();
         var direction=direct instanceof net.minecraft.entity.projectile.ProjectileEntity?direct.getVelocity().normalize():
             attacker!=null?point.subtract(attacker.getEyePos()).normalize():net.minecraft.util.math.Vec3d.ZERO;
         int o=64+(int)(command%CombatProtocol.SLOTS)*CombatProtocol.COMMAND_BYTES;
@@ -98,7 +119,7 @@ public final class CombatBridge {
             .putInt(o+56,1).putInt(o+60,0);
     }
     public static void server(MinecraftServer server){
-        if(BridgeClient.connected() && BridgeClient.cinematic()){serverActive=false;return;}
+        if(BridgeClient.loading() || (BridgeClient.connected() && BridgeClient.cinematic())){serverActive=false;return;}
         var s=state;var pose=BridgeClient.state();var client=MinecraftClient.getInstance();long now=NativeBridge.clockMs();
         if(!usable() || s==null || pose==null || s.epoch()!=pose.epoch() || !Protocol.fresh(now,s.tick()) || (s.flags()&1)==0){release();return;}
         var p=client.player==null?null:server.getPlayerManager().getPlayer(client.player.getUuid());
@@ -138,19 +159,30 @@ public final class CombatBridge {
         if(nativeHurt && p.isAlive())p.networkHandler.sendPacket(
             new net.minecraft.network.packet.s2c.play.EntityDamageS2CPacket(p,p.getDamageSources().generic()));
         var keep=new HashSet<Long>();
+        var bodies=shapes;
+        var models=parts;
+        var nativePlayer=new net.minecraft.util.math.Vec3d(p.getX()/pose.scale(),(p.getY()-pose.yOffset())/pose.scale(),-p.getZ()/pose.scale());
         if(BridgeClient.connected() && p.isAlive())for(var a:s.actors()){
             if(a.hp()==0 && a.bossNode()==0)continue;keep.add(a.id());var proxy=proxies.get(a.id());
             boolean hostile=(a.flags()&1)!=0;
+            var model=models==null?null:models.forActor(a.id(),a.stage(),epoch,now);
+            var nativeRoot=new net.minecraft.util.math.Vec3d(a.x(),a.y(),a.z());
+            var anchor=NativeActorGeometry.anchor(model,nativeRoot,nativePlayer,pose.scale());
+            var offset=nativeRoot.subtract(anchor);
             if(proxy==null || proxy.isRemoved() || proxy.getWorld()!=p.getWorld() ||
                (proxy instanceof NativeEnemyProxy)!=hostile){
                 if(proxy!=null)proxy.discard();
                 proxy=hostile?ENEMY_TYPE.create(p.getServerWorld()):TYPE.create(p.getServerWorld());if(proxy==null)continue;
                 proxy.nativeId=a.id();proxy.epoch=epoch;proxies.put(a.id(),proxy);
-                proxy.refreshPositionAndAngles(pose.mcX(a.x()),pose.mcY(a.y()),pose.mcZ(a.z()),0,0);
+                proxy.updateBody(bodies==null?null:bodies.forActor(a.id(),a.stage(),epoch,now),pose.scale());
+                proxy.updateModelParts(model,pose.scale(),offset);
+                proxy.refreshPositionAndAngles(anchor.x*pose.scale(),anchor.y*pose.scale()+pose.yOffset(),-anchor.z*pose.scale(),0,0);
                 p.getServerWorld().spawnEntity(proxy);
             }
             proxy.nativeFlags=a.flags();proxy.stage=a.stage();proxy.setHealth(Math.max(.001f,20f*a.hp()/a.maxHp()));
-            proxy.refreshPositionAndAngles(pose.mcX(a.x()),pose.mcY(a.y()),pose.mcZ(a.z()),0,0);
+            proxy.updateBody(bodies==null?null:bodies.forActor(a.id(),a.stage(),epoch,now),pose.scale());
+            proxy.updateModelParts(model,pose.scale(),offset);
+            proxy.refreshPositionAndAngles(anchor.x*pose.scale(),anchor.y*pose.scale()+pose.yOffset(),-anchor.z*pose.scale(),0,0);
         }
         proxies.entrySet().removeIf(entry -> {if(keep.contains(entry.getKey()))return false;entry.getValue().discard();return true;});
         report.putLong(0,now).putLong(8,epoch).putLong(16,hero).putLong(24,session)
@@ -160,5 +192,5 @@ public final class CombatBridge {
     /** Server thread only: removes ephemeral actors and discards its delta ledger. */
     public static void release(){serverActive=false;for(var proxy:proxies.values())proxy.discard();proxies.clear();
         owner=null;hero=epoch=command=ackCommand=injuryProcessed=0;health.reset();hurtFeedback.reset();outgoing=null;defenseAck=null;defenseState=null;}
-    public static void resetClient(){state=null;outgoing=null;defenseState=null;defenseAck=null;}
+    public static void resetClient(){state=null;shapes=null;parts=null;outgoing=null;defenseState=null;defenseAck=null;}
 }

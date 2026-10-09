@@ -28,6 +28,14 @@ $imgui=@('imgui.cpp','imgui_draw.cpp','imgui_tables.cpp','imgui_widgets.cpp','ba
 if($LASTEXITCODE){throw 'Host DLL build failed'}
 Copy-Item -LiteralPath "$projectRoot\config\sekirobridge.ini" -Destination "$packageRoot\sekirobridge.ini" -Force
 if(!$SkipTests){
+    & $cpp @common "$projectRoot\tests\actor_model_tests.cpp" '-o' "$buildRoot\actor_model_tests.exe"
+    if($LASTEXITCODE){throw 'Animated model parts fixture build failed'}
+    & "$buildRoot\actor_model_tests.exe"
+    if($LASTEXITCODE){throw 'Animated model geometry checks failed'}
+    & $cpp @common "$projectRoot\tests\actor_shape_tests.cpp" '-o' "$buildRoot\actor_shape_tests.exe"
+    if($LASTEXITCODE){throw 'Native actor shape fixture build failed'}
+    & "$buildRoot\actor_shape_tests.exe"
+    if($LASTEXITCODE){throw 'Native actor geometry checks failed'}
     & $cpp @common "$projectRoot\tests\cinematic_tests.cpp" '-o' "$buildRoot\cinematic_tests.exe"
     if($LASTEXITCODE){throw 'Cinematic fixture build failed'}
     & "$buildRoot\cinematic_tests.exe"

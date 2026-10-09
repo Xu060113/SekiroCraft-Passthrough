@@ -10,7 +10,7 @@ if($LASTEXITCODE){throw 'Native control fixture failed'}
 if($LASTEXITCODE){throw 'Java/JNI protocol test failed'}
 & java '-cp' "$projectRoot\mc\build\classes\java\main" 'dev.sekirobridge.InputForwarderSelfTest'
 if($LASTEXITCODE){throw 'Production input replay regression failed'}
-foreach($test in @('AudioBridgeSelfTest','CombatSelfTest')){
+foreach($test in @('AudioBridgeSelfTest','CombatSelfTest','NativeLoadSelfTest')){
     & java '-cp' "$projectRoot\mc\build\classes\java\main" "dev.sekirobridge.$test"
     if($LASTEXITCODE){throw "$test failed"}
 }
@@ -33,6 +33,10 @@ if(!$gameJar -or !$asmJars.Count){throw 'Mapped game or ASM dependency missing; 
 $gsonJar=Get-ChildItem -LiteralPath "$projectRoot\.cache\gradle-home\caches\modules-2\files-2.1\com.google.code.gson\gson" -Recurse -File -Filter '*.jar'|Where-Object Name -NotLike '*sources*'|Select-Object -First 1
 if(!$gsonJar){throw 'Gson dependency missing'}
 $verificationClasspath=(@($asmJars)+@($gsonJar.FullName)) -join ';'
+& javac '-cp' "$verificationClasspath;$projectRoot\mc\build\classes\java\main" '-d' $buildRoot "$projectRoot\tests\NativeLoadPlayer.java"
+if($LASTEXITCODE){throw 'Native map-load player fixture build failed'}
+& java '-cp' "$verificationClasspath;$projectRoot\mc\build\classes\java\main;$buildRoot" 'dev.sekirobridge.NativeLoadPlayer' "$projectRoot\mc\build\classes\java\main"
+if($LASTEXITCODE){throw 'Compiled client/server native map-load synchronization checks failed'}
 & java '-cp' $verificationClasspath "$projectRoot\tests\VanillaShield.java" $gameJar.FullName
 if($LASTEXITCODE){throw 'Vanilla shield direction checks failed'}
 & javac '-cp' "$verificationClasspath;$projectRoot\mc\build\classes\java\main" '-d' $buildRoot "$projectRoot\tests\VanillaVoid.java"
@@ -50,6 +54,17 @@ $glClasspath=(@($glJars)+@("$projectRoot\mc\build\classes\java\main",$buildRoot)
 if($LASTEXITCODE){throw 'GL readback regression fixture build failed'}
 & java '-cp' $glClasspath 'dev.sekirobridge.FrameCaptureGl'
 if($LASTEXITCODE){throw 'Production GL depth-format and readback regression failed'}
+& javac '-cp' $glClasspath '-d' $buildRoot "$projectRoot\tests\SwordEffectGl.java"
+if($LASTEXITCODE){throw 'Sword-effect GL fixture build failed'}
+$swordFrame=Join-Path $buildRoot 'sword-effect-frame.bin'
+& java '-cp' $glClasspath 'dev.sekirobridge.SwordEffectGl' $swordFrame
+if($LASTEXITCODE){throw 'Sword-effect emission/depth capture failed'}
+& "$buildRoot\compositor_tests.exe" $swordFrame
+if($LASTEXITCODE){throw 'Actual GL-to-D3D sword-effect occlusion failed'}
+if($SlashBladeJar){
+    & java '-cp' "$verificationClasspath;$glClasspath" "$projectRoot\tests\SlashBladeEffects.java" $SlashBladeJar
+    if($LASTEXITCODE){throw 'Installed SlashBlade effect-path verification failed'}
+}
 & java '-cp' $verificationClasspath "$projectRoot\tests\MixinTargets.java" $gameJar.FullName "$projectRoot\mc\build\classes\java\main\dev\sekirobridge\mixin"
 if($LASTEXITCODE){throw 'Minecraft injection target verification failed'}
 $productionGame=Get-ChildItem -LiteralPath "$projectRoot\.cache\gradle-home\caches\fabric-loom\minecraftMaven\net\minecraft\minecraft-merged-intermediary" -Recurse -File -Filter '*.jar'|Select-Object -First 1

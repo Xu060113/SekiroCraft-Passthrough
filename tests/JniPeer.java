@@ -33,6 +33,18 @@ public final class JniPeer {
         if(combat.getLong(24)!=101 || combat.getInt(40)!=250 || combat.getLong(88)!=102 || combat.getFloat(96)!=12 || combat.getInt(116)!=6)
             throw new AssertionError("native actor / life ABI");
         if(NativeBridge.combatState(handle,Protocol.direct(3159)))throw new AssertionError("short combat destination accepted");
+        var shapes=Protocol.direct(2080);
+        while(System.currentTimeMillis()<deadline && !NativeBridge.actorShapes(handle,shapes))Thread.sleep(5);
+        if(shapes.getLong(16)!=state.epoch() || shapes.getLong(32)!=102 || shapes.getLong(40)!=1 ||
+           shapes.getFloat(48)!=3 || shapes.getFloat(52)!=5.4f || shapes.getFloat(56)!=.75f || shapes.getInt(60)!=1)
+            throw new AssertionError("large Boss native geometry and phase survive cross-process JNI");
+        if(NativeBridge.actorShapes(handle,Protocol.direct(2079)))throw new AssertionError("short geometry destination accepted");
+        var parts=Protocol.direct(198688);
+        while(System.currentTimeMillis()<deadline && !NativeBridge.actorParts(handle,parts))Thread.sleep(5);
+        if(parts.getLong(16)!=state.epoch() || parts.getLong(32)!=102 || parts.getLong(40)!=1 || parts.getInt(48)!=2 ||
+           parts.getInt(52)!=140 || parts.getFloat(88)!=79 || parts.getFloat(100)!=81)
+            throw new AssertionError("animated far limb parts survive cross-process JNI");
+        if(NativeBridge.actorParts(handle,Protocol.direct(198687)))throw new AssertionError("short multipart destination accepted");
         var report=Protocol.direct(4160);
         report.putLong(0,NativeBridge.clockMs()).putLong(8,state.epoch()).putLong(16,101).putLong(24,103)
             .putDouble(32,.1).putDouble(40,.05).putLong(48,1).putInt(56,1)
