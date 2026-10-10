@@ -104,7 +104,7 @@ def main():
     assets = {executable.name: executable.read_bytes(), tutorial.name: tutorial.read_bytes()}
     for name in ("MinHook-LICENSE.txt", "ImGui-LICENSE.txt", "SekiroTool-LICENSE.txt", "THIRD_PARTY_NOTICES.md"):
         assets["licenses/" + name] = files[name]
-    archive_path = output / ("SekiroCraft-一键安装-" + version + ".zip")
+    archive_path = output / ("SekiroCraft-Installer-" + version + ".zip")
     write_zip(archive_path, assets)
     (output / "SHA256SUMS.txt").write_text("".join(digest(path.read_bytes()).lower() + "  " + path.name + "\n" for path in (executable, archive_path, tutorial)), encoding="utf-8")
     receipt = dict(info, installerGameTestPending=True, installerPublished=False, gamesLaunched=False, installerSourceUncommitted=True,

@@ -15,7 +15,7 @@ Forge 1.20.1 独立移植在 `mc-forge/`，以 47.4.10 为构建基准，**previ
 
 ## 一键部署（无需编译，推荐新用户）
 
-到 [2026-10-11 Forge 与双加载器安装器发布页](https://github.com/Xu060113/SekiroCraft-Passthrough/releases/tag/v0.1.0-forge-preview.6-20261011)，下载 `SekiroCraft-一键安装-0.1.0-20261011.zip`，解压后双击 EXE。旁边的 `先读我-简易教程.txt` 可用记事本打开，程序内也有教程按钮。安装器源码及检查范围见 [安装器验收](docs/INSTALLER_TEST.md)。
+到 [2026-10-11 Forge 与双加载器安装器发布页](https://github.com/Xu060113/SekiroCraft-Passthrough/releases/tag/v0.1.0-forge-preview.6-20261011)，下载 `SekiroCraft-Installer-0.1.0-20261011.zip`（一键安装包），解压后双击 EXE。旁边的 `先读我-简易教程.txt` 可用记事本打开，程序内也有教程按钮。发布页单独的 `START-HERE-zh-CN.txt` 也是同一份中文教程；附件名使用英文以兼容 GitHub。安装器源码及检查范围见 [安装器验收](docs/INSTALLER_TEST.md)。
 
 | 所选加载器 | 先在启动器准备 | 本次安装内容 |
 | --- | --- | --- |

@@ -21,7 +21,7 @@ Forge 使用已游戏测试的 preview.6；Fabric 保留 2026-10-10 已发布版
 4. 实例运行到主菜单后，正常退出两款游戏和启动器，再安装。
 
 二、双击安装，无需 Git / 编译工具 / PowerShell 命令
-1. 解压 SekiroCraft-一键安装-0.1.0-20261011.zip。
+1. 下载并解压 SekiroCraft-Installer-0.1.0-20261011.zip（一键安装包）。
    双击其中 SekiroCraft-Setup-0.1.0-20261011.exe。
 2. “只狼目录”：选择含 sekiro.exe 的文件夹。
    Steam：库 -> 右键只狼 -> 管理 -> 浏览本地文件。
