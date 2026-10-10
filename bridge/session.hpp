@@ -108,9 +108,11 @@ inline sc::Mat4 playerCameraPose(const PlayerPacket &p) {
 inline sc::Mat4 frameCameraPose(const FrameMeta &m) {
     PlayerPacket camera;
     std::memcpy(&camera.eye,m.eye,12);std::memcpy(&camera.forward,m.forward,12);
-    camera.yaw=(m.flags & ExplicitYaw) ? std::bit_cast<float>(m.reserved) :
-        std::atan2(-m.forward[0],-m.forward[2])*180/3.14159265358979323846f;
-    return playerCameraPose(camera);
+    camera.yaw=frameYaw(m);
+    auto pose=playerCameraPose(camera);
+    float roll=frameRoll(m)*3.14159265358979323846f/180,c=std::cos(roll),s=std::sin(roll);
+    for(int i=0;i<3;++i){float r=pose.at(0,i),u=pose.at(1,i);pose.at(0,i)=r*c+u*s;pose.at(1,i)=u*c-r*s;}
+    return pose;
 }
 inline bool validInput(const InputPacket &p) {
     if (!p.tick || !p.epoch || !std::isfinite(p.mouseX) || !std::isfinite(p.mouseY)) return false;

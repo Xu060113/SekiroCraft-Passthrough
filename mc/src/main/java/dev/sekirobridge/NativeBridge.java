@@ -28,6 +28,8 @@ public final class NativeBridge {
         if(abiVersion()!=3)throw new IllegalStateException("Mismatched bridge JNI ABI; install the paired DLL and JAR.");
     }
     public static native int abiVersion();
+    public static native boolean beginEffectDepth();
+    public static native void endEffectDepth();
     public static native long open(String channel);
     public static native void close(long handle);
     public static native boolean control(long handle, ByteBuffer destination);

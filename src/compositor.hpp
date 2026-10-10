@@ -124,13 +124,12 @@ class Compositor {
         sc::Vec3 forward{frame.forward[0], frame.forward[1], frame.forward[2]};
         float projectionY = 1 / std::tan(frame.fovY / 2);
         float projectionX = projectionY / frame.aspect;
-        sc::Vec3 right = sc::normalize(sc::Vec3{forward.z, 0, -forward.x});
-        if (frame.flags & ExplicitYaw) {
-            float yaw = std::bit_cast<float>(frame.reserved) * 3.14159265358979323846f / 180;
-            right = {-std::cos(yaw), 0, std::sin(yaw)};
-        }
+        auto capturePose=frameCameraPose(frame);
+        sc::Vec3 right{capturePose.at(0,0),capturePose.at(0,1),capturePose.at(0,2)};
+        sc::Vec3 up{capturePose.at(1,0),capturePose.at(1,1),capturePose.at(1,2)};
         auto pose = sc::inverse(camera.view);
-        if (!pose || sc::dot(right, {pose->at(0, 0), pose->at(0, 1), pose->at(0, 2)}) < .9999995f)
+        if (!pose || sc::dot(right, {pose->at(0, 0), pose->at(0, 1), pose->at(0, 2)}) < .9999995f ||
+            sc::dot(up,{pose->at(1,0),pose->at(1,1),pose->at(1,2)}) < .9999995f)
             return false;
         auto closeProjection = [](float a, float b) {
             return std::isfinite(a) && std::isfinite(b) &&
@@ -364,11 +363,9 @@ float4 overlay(Out i):SV_TARGET{return World.SampleLevel(Point,frameUV(i.uv),0);
         set(values.captureEye, {frameMeta_.eye[0], frameMeta_.eye[1], frameMeta_.eye[2]});
         basis({frameMeta_.forward[0], frameMeta_.forward[1], frameMeta_.forward[2]}, values.captureForward,
               values.captureRight, values.captureUp);
-        if(frameMeta_.flags&ExplicitYaw){
-            float yaw=std::bit_cast<float>(frameMeta_.reserved)*3.14159265358979323846f/180;
-            sc::Vec3 r{-std::cos(yaw),0,std::sin(yaw)},f{frameMeta_.forward[0],frameMeta_.forward[1],frameMeta_.forward[2]};
-            set(values.captureRight,r);set(values.captureUp,{f.y*r.z-f.z*r.y,f.z*r.x-f.x*r.z,f.x*r.y-f.y*r.x});
-        }
+        auto capturePose=frameCameraPose(frameMeta_);
+        set(values.captureRight,{capturePose.at(0,0),capturePose.at(0,1),capturePose.at(0,2)});
+        set(values.captureUp,{capturePose.at(1,0),capturePose.at(1,1),capturePose.at(1,2)});
         set(values.currentEye, camera.eye);
         basis(camera.forward, values.currentForward, values.currentRight, values.currentUp);
         if(auto pose=sc::inverse(camera.view)){

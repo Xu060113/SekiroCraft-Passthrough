@@ -2,13 +2,35 @@
 
 在《只狼：影逝二度》的场景里操作真正的 Minecraft 人物、方块、背包和生物的 Windows 实验性模组。
 
-本项目同时运行 **Minecraft 1.20.1 Fabric 与只狼**：Minecraft 负责人物操作和游戏逻辑，只狼提供场景、原生敌人和钩索；通过共享内存、JNI 与 D3D11 合成画面和同步状态。它不是把 Minecraft 反编译成 C++，也不是完整移植。原创 C++ 方块版本独立保留，本仓库只包含双进程桥接版本。
+本项目同时运行 **Minecraft 1.20.1（Fabric 或独立 Forge 版）与只狼**：Minecraft 负责人物操作和游戏逻辑，只狼提供场景、原生敌人和钩索；通过共享内存、JNI 与 D3D11 合成画面和同步状态。它不是把 Minecraft 反编译成 C++，也不是完整移植。原创 C++ 方块版本独立保留，本仓库只包含双进程桥接版本。
 
 当前版本：`0.1.0`；补丁：`gameplay5-defense-render`；通信协议：`v3`。这是持续开发的版本，离线检查通过不代表所有场景和 Boss 都已完成实机验收。
 
-2026-10-10 更新补充第三人称下蹲与武器动画合成、可保存的姿态条显示开关，并扩大受击特效深度保护范围。**用户实机反馈受击时 MC 人物和方块仍会闪烁，尚待后续修复。** 本轮已由用户测试并授权上传；各场景覆盖情况与已知问题见 [更新日志](CHANGELOG.md)。MC 自定义忍杀动作与结算接口目前处于 [方案设计](docs/MC_DEATHBLOW_DESIGN.md) 阶段，尚未替代自动扣红点。后续 GitHub 提交和推送仍需先经过用户游戏测试及上传授权。一键安装程序与记事本教程正在准备，当前下载包仍按下面的脚本步骤部署。
+2026-10-10 更新补充第三人称下蹲与武器动画合成、可保存的姿态条显示开关，并扩大受击特效深度保护范围。**用户实机反馈受击时 MC 人物和方块仍会闪烁，尚待后续修复。** 本轮已由用户测试并授权上传；各场景覆盖情况与已知问题见 [更新日志](CHANGELOG.md)。MC 自定义忍杀动作与结算接口目前处于 [方案设计](docs/MC_DEATHBLOW_DESIGN.md) 阶段，尚未替代自动扣红点。后续 GitHub 提交和推送仍需先经过用户游戏测试及上传授权。中文一键安装程序已提供 Forge/Fabric 选择及记事本教程；下方原脚本流程仍用于 Fabric 部署。
 
 可下载的桥接安装包和 MC 环境配置包见 [Releases](https://github.com/Xu060113/SekiroCraft-Passthrough/releases)。当前 **Fabric Loader 0.19.5 + Fabric API 0.92.12** 配置、模组的精确版本及原作者下载链接见 [MC 配置与模组](docs/MODPACK.md)。
+
+Forge 1.20.1 独立移植在 `mc-forge/`，以 47.4.10 为构建基准，**preview.6 已由用户在 Forge 47.4.26 游戏中测试通过并授权发布**，含右键黑屏修复、窗口/深度复制性能优化及次元斩绝相机与原粒子适配。本次 **Fabric 发布版本与安装器内的 Fabric DLL/JAR 保留 `v0.1.0-20261010` 原字节，不升级**；原生 Boss 血条位置移动与左右切换也不包含在此次发布中。环境、构建和手动安装见 [Forge 移植说明](docs/FORGE_PORT.md)。
+
+
+## 一键部署（无需编译，推荐新用户）
+
+到 [2026-10-11 Forge 与双加载器安装器发布页](https://github.com/Xu060113/SekiroCraft-Passthrough/releases/tag/v0.1.0-forge-preview.6-20261011)，下载 `SekiroCraft-一键安装-0.1.0-20261011.zip`，解压后双击 EXE。旁边的 `先读我-简易教程.txt` 可用记事本打开，程序内也有教程按钮。安装器源码及检查范围见 [安装器验收](docs/INSTALLER_TEST.md)。
+
+| 所选加载器 | 先在启动器准备 | 本次安装内容 |
+| --- | --- | --- |
+| Forge（默认选项） | MC 1.20.1 + Forge 47.4.26，运行一次后退出；Java 17 | 已测试 preview.6 JAR + 配套只狼 DLL；不安装 Fabric API |
+| Fabric | MC 1.20.1 + Fabric Loader，建议 0.19.5；Java 21，最低 17 | 原已发布 0.1.0 DLL/JAR + API 0.92.12+1.20.1，版本不变 |
+
+1. 正常退出两款游戏及启动器。只狼目录选含 `sekiro.exe` 的文件夹。
+2. 选择 **Forge 或 Fabric**，从启动器打开该实例的实际游戏目录，选择含 `mods` 的目录。Forge 只支持已有实例；官方启动器新建独立配置选项仅用于 Fabric。不要把两种加载器的模组混放。
+3. 只狼钩索键与安装器所选字母一致，默认 M。建议勾选 Boss 血量耗尽自动扣红点，因为完整 MC 忍杀仍未实现。
+4. 先“检查目录”，再“一键安装 / 更新”。已有只狼加载器时，确认暂时停用旧加载器才勾选“备份并替换”；旧文件会备份。以后统一使用这个安装器，不要与旧脚本交替更新。
+5. 进入两款游戏，在 MC 单人世界输入 `/sekirobridge on`，切回只狼操作。F6 切换菜单输入，F8 暂停，F5 切视角；详细操作见 [简易教程](installer/简易教程.txt)。
+
+切换加载器或更换 MC 目录时，**先恢复旧安装再安装另一套**。同一只狼目录只能关联一套成对桥接。安装器会校验程序指纹、备份旧文件及只狼存档副本，失败时回滚；不改变个人键位、世界或其它玩法模组。备份记录在只狼目录 `.sekirocraft-installer`，不要删除。正常玩只狼时用“停用桥接”关闭自动扣红点；恢复按钮还原首次安装前状态，该状态可能本来就有其它模组。
+
+本次程序已通过隔离安装/更新/恢复检查与中文窗口预览，未由开发工具实际部署到你的游戏。两套游戏载荷已经过用户测试；首次使用新安装器的实际启动器联网补库和完整操作路径仍需安装者确认。受击闪烁仍是已知问题，第三方玩法模组需自行安装对应加载器版本。
 
 ## 功能与边界
 
@@ -48,7 +70,7 @@
 - 构建需要 Git、Windows x64 JDK 21 和 PowerShell（推荐 PowerShell 7）。Java 字节码目标为 17。
 - 首次构建需要联网下载依赖。脚本固定 llvm-mingw `20260922`、Gradle `8.8`、Fabric Loom `1.6.12`。
 
-Forge/OptiFine 配置不能直接加载本 Fabric 模组。Sodium、Iris、其他渲染模组及其他只狼 DLL 加载器的兼容性尚未验证，首次测试请用独立的原版 Fabric 实例。
+Forge 使用独立 Forge JAR，不能直接加载 Fabric 桥接；OptiFine 组合未经验证。Sodium、Iris、其他渲染模组及其他只狼 DLL 加载器的兼容性尚未验证，首次测试请用独立的原版 Fabric 实例。
 
 ## 下载与构建
 
@@ -79,7 +101,7 @@ $env:Path = "$env:JAVA_HOME\bin;$env:Path"
 
 Git 仓库提供源码；[Releases](https://github.com/Xu060113/SekiroCraft-Passthrough/releases) 提供成对的 DLL/JAR 安装包及 `.mrpack` 环境配置包，不包含游戏文件。安装包保留更新器需要的 `dist`、`build/verification.json` 和根目录 `scripts`，可以在解压后的根目录按下面步骤安装。源码用户先完成构建，不能只复制 ZIP 内的脚本单独执行。
 
-## 首次部署
+## Fabric 原脚本部署
 
 先备份只狼存档和 MC 世界，正常退出两款游戏。关闭仍在运行的 Java/Gradle 进程后再执行更新器。
 
@@ -128,7 +150,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File 'C:\Mods\SekiroCraft-Pas
 ## 启动与操作
 
 1. 启动只狼并进入可移动的游戏场景。
-2. 启动专用 Fabric 配置，建立独立的**单人创造虚空世界**用于首轮测试；保持 MC 进程运行。
+2. 启动所选加载器的专用 MC 配置，建立独立的**单人创造虚空世界**用于首轮测试；保持 MC 进程运行。
 3. 在 MC 聊天框执行 `/sekirobridge on`。连接初始化从狼的位置取得出生坐标，默认第一人称。
 4. 切换到只狼窗口，使用 MC 操作。若正在只狼菜单输入模式，按 F6 返回 MC 控制。
 5. 用 `/sekirobridge status` 检查连接；停止桥接执行 `/sekirobridge off`。
@@ -136,6 +158,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File 'C:\Mods\SekiroCraft-Pas
 新增的 MC 耐力条实际显示的是只狼**姿态值**。`/sekirobridge stamina off` 隐藏桥接添加的自己与目标姿态条，`/sekirobridge stamina on` 显示，`/sekirobridge stamina toggle` 切换；仅输入 `/sekirobridge stamina` 可查看当前开关。默认显示，设置保存到该 MC 游戏目录的 `sekirobridge/bridge.properties`（`show_posture_hud`），重启后保留。它不改变姿态、伤害、血条或物品栏；F1 和 `/sekirobridge hud` 继续控制原版界面可见性。
 
 两端默认共享内存通道均为 `default`；使用同一 Windows 登录会话运行，两端设置必须一致。通信不需要开放网络端口。
+
 
 | 按键 | 功能 |
 | --- | --- |

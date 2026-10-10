@@ -1,0 +1,9 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "dev.sekirobridge.compat",
+  "plugin": "dev.sekirobridge.compat.ForgeCompatPlugin",
+  "compatibilityLevel": "JAVA_17",
+  "client": ["VixPostPipelineMixin", "AaaParticleDepthMixin"],
+  "injectors": { "defaultRequire": 1 }
+}

@@ -146,6 +146,7 @@ struct App {
     ComPtr<ID3D11RenderTargetView> target;
     ComPtr<ID3D11DepthStencilView> sceneDepth;
     ComPtr<ID3D11DepthStencilView> sceneCleanDepth;
+    uint64_t sceneCleanRevision{};
     D3D11_VIEWPORT sceneViewport{};
     struct Binding {
         ComPtr<ID3D11DepthStencilView> depth;
@@ -285,6 +286,7 @@ struct App {
                         (cinematic?bridge::NativeCinematic:0);
         control.capabilities = 7 | (playerFeatures && movement.installed() ? bridge::constraintCapability : 0) |
                                (playerFeatures && movement.canFly() ? bridge::flightCapability : 0);
+        if(driver.ready())control.capabilities |= bridge::cameraRollCapability;
         if(playerFeatures && driver.ready() && movement.installed() && movement.canFly())
             control.capabilities |= bridge::mcOwnerCapability | bridge::terrainCapability;
         if(playerFeatures && combat.ready() && (control.capabilities & bridge::mcOwnerCapability))
@@ -389,6 +391,7 @@ struct App {
                     " mouseState="+std::to_string(sc::input::mouseStates.load())+
                     " mouseData="+std::to_string(sc::input::mouseData.load()));
             sc::log("depth snapshots="+std::to_string(sceneSnapshot.captures)+
+                    " immutableReuses="+std::to_string(sceneSnapshot.reused)+
                     " snapshotFailures="+std::to_string(snapshotFailures)+
                     " unknownLists="+std::to_string(unknownLists.load())+
                     " finishBusy="+std::to_string(finishBusy.load())+
@@ -593,7 +596,11 @@ bool captureSceneDepth(ID3D11DeviceContext *context) {
     auto *source=a.sceneCleanDepth?a.sceneCleanDepth.Get():a.sceneDepth.Get();
     // Immediate FX sealing may already own this exact snapshot. CopyResource
     // cannot copy a resource onto itself, and the immutable copy needs no refresh.
-    if (source!=a.sceneSnapshot.view() && !a.sceneSnapshot.capture(context, source)) {
+    bool copied=source==a.sceneSnapshot.view() ||
+        (a.sceneCleanDepth && a.sceneCleanRevision?
+            a.sceneSnapshot.captureImmutable(context,source,a.sceneCleanRevision):
+            a.sceneSnapshot.capture(context,source));
+    if (!copied) {
         ++a.snapshotFailures;
         a.snapshotFrame.reset();
         a.snapshotAt = UINT64_MAX;
@@ -612,7 +619,7 @@ void flushImmediateDepth(ID3D11DeviceContext *context) {
         captureSceneDepth(context);
     }
 }
-void submitSceneDraw(const bridge::SceneDraw &draw) {
+void submitSceneDraw(const bridge::SceneDraw &draw,uint64_t executionRevision=0) {
     auto &a = *app;
     a.sceneReadiness.observe(draw,a.frames);
     if(draw.effectWrite)return;
@@ -632,10 +639,14 @@ void submitSceneDraw(const bridge::SceneDraw &draw) {
         bridge::SceneDraw previous{a.sceneDepth,a.sceneViewport,a.sceneCamera,a.sceneFrame,a.bestDepthScore};
         previous.cleanDepth=a.sceneCleanDepth;
         auto clean=draw.cleanDepth;
-        if(!clean && bridge::inheritsCleanDepth(previous,draw,a.sceneDepthCleared))clean=previous.cleanDepth;
+        auto cleanRevision=clean?executionRevision:0;
+        if(!clean && bridge::inheritsCleanDepth(previous,draw,a.sceneDepthCleared)){
+            clean=previous.cleanDepth;cleanRevision=a.sceneCleanRevision;
+        }
         a.bestDepthScore = score;
         a.sceneDepth = draw.depth;
         a.sceneCleanDepth = clean;
+        a.sceneCleanRevision = cleanRevision;
         a.sceneDepthCleared=false;
         a.sceneViewport = draw.viewport;
         a.depthFrame = a.frames;
@@ -838,7 +849,9 @@ void STDMETHODCALLTYPE hookExecuteCommands(ID3D11DeviceContext *context, ID3D11C
         return;
     }
     for (const auto &draw : captured->draws)
-        submitSceneDraw(draw);
+        // A sealed depth copy is immutable until its producing command list
+        // executes again, including a replay within the same presented frame.
+        submitSceneDraw(draw,a.executedLists);
     // Several recorded batches may write one depth view. Copy once, after the
     // whole command list has executed, and only when it wrote the final winner.
     if (std::any_of(captured->draws.begin(), captured->draws.end(), [&](const auto &draw) {
@@ -1041,6 +1054,7 @@ HRESULT STDMETHODCALLTYPE hookPresent(IDXGISwapChain *swap, UINT interval, UINT 
         ++a.frames;
         a.immediateDirty=false;
         a.sceneFrame.reset();a.sceneCamera={};a.sceneCleanDepth.Reset();
+        a.sceneCleanRevision=0;
         a.sceneDepthCleared=false;
         a.depthScores.clear();
         a.bestDepthScore = 0;
@@ -1082,6 +1096,7 @@ HRESULT STDMETHODCALLTYPE hookResize(IDXGISwapChain *swap, UINT count, UINT widt
         a.sceneDepth.Reset();
         a.sceneReadiness.reset();
         a.sceneCleanDepth.Reset();
+        a.sceneCleanRevision=0;
         {std::lock_guard metadataLock(a.recorder.mutex());
             a.bindings.clear();a.recordings.clear();
             a.recordingGeneration.fetch_add(1);++a.resourceEpoch;

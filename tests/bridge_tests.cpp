@@ -258,5 +258,13 @@ int main(int argc, char **argv) {
         out.write(reinterpret_cast<char *>(&c), sizeof(c));
         require(out.good(), "write cross-language binary fixture");
     }
+    if(argc>2){
+        bridge::FrameMeta roll;
+        std::ifstream input(argv[2],std::ios::binary);input.read(reinterpret_cast<char*>(&roll),sizeof(roll));
+        require(input.good() && bridge::valid(roll),"Java packed camera frame validates in native code");
+        require((roll.flags & bridge::PackedAngles) && std::abs(bridge::frameRoll(roll)-37)<.006f,
+            "Java roll decodes with native quantization");
+        require(std::abs(std::abs(bridge::frameYaw(roll))-180)<.006f,"Java yaw remains independent from roll");
+    }
     std::cout << checks << " bridge checks passed\n";
 }

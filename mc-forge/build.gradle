@@ -1,0 +1,82 @@
+plugins { id 'dev.architectury.loom' version '1.6.422' }
+
+version = project.mod_version
+group = 'dev.sekirobridge'
+base { archivesName = 'sekiro-minecraft-passthrough-forge' }
+
+repositories {
+    maven { url = 'https://maven-central.storage-download.googleapis.com/maven2/' }
+}
+repositories.configureEach { repository ->
+    if (repository instanceof MavenArtifactRepository && repository.url.host in ['repo.maven.apache.org', 'repo1.maven.org']) {
+        repository.url = uri('https://maven-central.storage-download.googleapis.com/maven2/')
+    }
+}
+
+loom {
+    forge {
+        mixinConfig 'sekirobridge.mixins.json'
+        mixinConfig 'sekirobridge-forge-compat.mixins.json'
+    }
+    mixin { defaultRefmapName = 'sekirobridge-forge.refmap.json' }
+    runs { client { client(); runDir 'run' } }
+}
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    mappings 'net.fabricmc:yarn:1.20.1+build.10:v2'
+    forge "net.minecraftforge:forge:${project.minecraft_version}-${project.forge_version}"
+}
+
+// Share gameplay/transport code without including the Fabric loader adapters.
+def sharedJava = layout.buildDirectory.dir('generated/shared-java')
+tasks.register('verifyAdapterBaseline') {
+    def baselineFile = file('adapter-baseline.json')
+    inputs.file baselineFile
+    inputs.files new groovy.json.JsonSlurper().parse(baselineFile).keySet().collect { file("../${it}") }
+    doLast {
+        def baseline = new groovy.json.JsonSlurper().parse(baselineFile)
+        baseline.each { path, expected ->
+            def bytes = file("../${path}").getText('UTF-8')
+                .replace('\uFEFF', '').replace('\r\n', '\n').getBytes('UTF-8')
+            def actual = java.security.MessageDigest.getInstance('SHA-256').digest(bytes).encodeHex().toString()
+            if (actual != expected) {
+                throw new GradleException("Fabric ${path} changed: reconcile its Forge adapter, then update adapter-baseline.json.")
+            }
+        }
+    }
+}
+tasks.register('syncSharedJava', Sync) {
+    from('../mc/src/main/java') {
+        exclude 'dev/sekirobridge/BridgeCommon.java'
+        exclude 'dev/sekirobridge/BridgeClient.java'
+        exclude 'dev/sekirobridge/CombatBridge.java'
+        exclude 'dev/sekirobridge/mixin/InGameHudMixin.java'
+        exclude 'dev/sekirobridge/mixin/GameRendererMixin.java'
+        exclude 'dev/sekirobridge/mixin/CollisionViewMixin.java'
+        exclude 'dev/sekirobridge/mixin/CrumblingAlphaMixin.java'
+    }
+    into sharedJava
+}
+sourceSets.main.java.srcDir(sharedJava)
+tasks.named('compileJava') { dependsOn 'syncSharedJava', 'verifyAdapterBaseline' }
+tasks.withType(JavaCompile).configureEach { options.release = 17 }
+java { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+
+processResources {
+    inputs.property 'version', project.version
+    filesMatching('META-INF/mods.toml') { expand 'version': project.version }
+    from('../build/passthrough-native') { include 'sekirobridge-jni.dll'; into 'native/windows-x64' }
+    doFirst {
+        if (!file('../build/passthrough-native/sekirobridge-jni.dll').isFile()) {
+            throw new GradleException('Build the paired JNI DLL with scripts/build-native.ps1 first.')
+        }
+    }
+}
+jar { manifest { attributes 'MixinConfigs': 'sekirobridge.mixins.json,sekirobridge-forge-compat.mixins.json' } }
+
+tasks.register('writeVerificationClasspath') {
+    dependsOn classes
+    doLast {
+        file("${buildDir}/verification-classpath.txt").text = sourceSets.main.runtimeClasspath.asPath
+    }
+}

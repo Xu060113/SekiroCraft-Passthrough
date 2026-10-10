@@ -10,6 +10,7 @@ find_package(JNI REQUIRED)
 add_subdirectory("${SC_DEPENDENCY_ROOT}/minhook" "${CMAKE_BINARY_DIR}/minhook")
 add_library(sekirobridge-jni SHARED bridge/jni.cpp)
 target_include_directories(sekirobridge-jni PRIVATE ${JNI_INCLUDE_DIRS})
+target_link_libraries(sekirobridge-jni PRIVATE minhook opengl32)
 target_compile_definitions(sekirobridge-jni PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 set_target_properties(sekirobridge-jni PROPERTIES PREFIX "" RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/build/passthrough-native")
 add_library(dinput8 SHARED src/proxy.cpp src/host_mod.cpp src/movement_hook.cpp src/movement_stub.S src/dinput8.def

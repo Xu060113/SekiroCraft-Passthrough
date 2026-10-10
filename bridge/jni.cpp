@@ -1,8 +1,11 @@
 #include "shared_memory.hpp"
 #include <jni.h>
+#include "effect_depth.hpp"
 
 // Handles are owned by NativeBridge and used on Minecraft's render thread only.
 extern "C" {
+JNIEXPORT jboolean JNICALL Java_dev_sekirobridge_NativeBridge_beginEffectDepth(JNIEnv*,jclass){return bridge::effectDepth::begin();}
+JNIEXPORT void JNICALL Java_dev_sekirobridge_NativeBridge_endEffectDepth(JNIEnv*,jclass){bridge::effectDepth::end();}
 JNIEXPORT jint JNICALL Java_dev_sekirobridge_NativeBridge_abiVersion(JNIEnv*,jclass){return bridge::version;}
 JNIEXPORT jboolean JNICALL Java_dev_sekirobridge_NativeBridge_projectileRays(JNIEnv *env,jclass,jlong handle,jobject b) {
     if(!handle || !b || env->GetDirectBufferCapacity(b)<jlong(sizeof(bridge::ProjectileRays)))return false;

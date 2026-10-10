@@ -15,3 +15,6 @@ mc/.gradle/
 mc/build/
 runtime/
 mc/run/
+mc-forge/.gradle/
+mc-forge/build/
+mc-forge/run/

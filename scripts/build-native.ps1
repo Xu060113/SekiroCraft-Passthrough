@@ -21,7 +21,7 @@ foreach($source in @('buffer','hook','trampoline','hde\hde64')){
     if($LASTEXITCODE){throw 'MinHook build failed'}
     $objects+=$object
 }
-& $cpp @common '-shared' '-I' "$JdkRoot\include" '-I' "$JdkRoot\include\win32" "$projectRoot\bridge\jni.cpp" '-o' "$buildRoot\sekirobridge-jni.dll"
+& $cpp @common '-shared' '-I' "$JdkRoot\include" '-I' "$JdkRoot\include\win32" "$projectRoot\bridge\jni.cpp" @objects '-lopengl32' '-o' "$buildRoot\sekirobridge-jni.dll"
 if($LASTEXITCODE){throw 'JNI build failed'}
 $imgui=@('imgui.cpp','imgui_draw.cpp','imgui_tables.cpp','imgui_widgets.cpp','backends\imgui_impl_dx11.cpp','backends\imgui_impl_win32.cpp')|ForEach-Object{Join-Path "$DependencyRoot\imgui" $_}
 & $cpp @common '-shared' "$projectRoot\src\proxy.cpp" "$projectRoot\src\host_mod.cpp" "$projectRoot\src\movement_hook.cpp" "$projectRoot\src\movement_stub.S" "$projectRoot\src\combat_trace.cpp" "$projectRoot\src\combat_trace_stub.S" "$projectRoot\src\combat_game_hook.cpp" "$projectRoot\src\combat_game_stub.S" "$projectRoot\src\dinput8.def" @imgui @objects '-ld3d11' '-ldxgi' '-ld3dcompiler' '-lbcrypt' '-luser32' '-lgdi32' '-limm32' '-ldwmapi' '-ldxguid' '-o' "$packageRoot\dinput8.dll"

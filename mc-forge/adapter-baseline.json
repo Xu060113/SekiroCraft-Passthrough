@@ -1,0 +1,10 @@
+{
+  "mc/src/main/java/dev/sekirobridge/BridgeCommon.java": "7b268bf2ecb829f66426086d508b46acb185566e933826ac0929e5bead66616a",
+  "mc/src/main/java/dev/sekirobridge/BridgeClient.java": "b71c2ffa8843350c778ad4a6275d66533143a9c0b864f77cf9ca173d332efdf0",
+  "mc/src/main/java/dev/sekirobridge/CombatBridge.java": "f585fd38d6d953d98c2ef0bc805463d7e8040ca3d2a7ffdfabaddf4dce393ebd",
+  "mc/src/main/java/dev/sekirobridge/mixin/GameRendererMixin.java": "3ec0802f75b37a0b1eb41dd3dc2a6eb762e14abc165b12099d8ec19cfc866dd7",
+  "mc/src/main/java/dev/sekirobridge/mixin/CollisionViewMixin.java": "50a2347cad9a107bc95acafaff5ca29ea77ec6701e1dba2d0e2608282d1963e5",
+  "mc/src/main/java/dev/sekirobridge/mixin/CrumblingAlphaMixin.java": "a3e87f1acad5b3ef957177059a9c5e5a92d730663772dc4cb2fa3765c56e1d6c",
+  "mc/src/main/java/dev/sekirobridge/mixin/InGameHudMixin.java": "1357f7e698cd953e463ef11f8f4af3e8c732f14869f3d32b85f805608db85d45",
+  "mc/src/main/resources/sekirobridge.mixins.json": "21ee2e1d076c25fba1e0f0be747f88fedd6fe0fc659abf8148b3c922973f79e0"
+}

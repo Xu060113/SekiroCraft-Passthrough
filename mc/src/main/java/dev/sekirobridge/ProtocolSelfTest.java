@@ -84,6 +84,13 @@ public final class ProtocolSelfTest {
         require(InputForwarder.glfwKey(116)==294 && InputForwarder.glfwKey(32)==32 &&
                 InputForwarder.glfwKey(69)==69,"MC F5, jump and inventory mappings");
         require(s.withFov((float)Math.toRadians(7)).valid(),"MC spyglass projection can cross the bridge");
+        var rolled=s.withCamera(0,1.62f,0,0,0,1,180,37);
+        var rollMeta=Protocol.metadata(rolled,11,4,4);
+        require(rollMeta.getInt(40)==15,"roll metadata uses packed angles with unchanged v3 frame size");
+        int packed=rollMeta.getInt(44);
+        require(Math.abs((short)(packed>>>16)*180f/32767-37)<.006,"roll survives quantization");
+        byte[] rollBytes=new byte[Protocol.META_BYTES];rollMeta.get(rollBytes);
+        Files.write(Path.of(args[2]+".roll"),rollBytes);
         NativeBridge.close(handle);
         System.out.println(checks + " Java/JNI protocol checks passed");
     }

@@ -170,6 +170,18 @@ public final class MixinTargets {
                                                c.name + " -> " + selected.name + selected.desc);
                             @SuppressWarnings("unchecked") var ats = (List<AnnotationNode>)value(a, "at");
                             for (var at : ats)
+                                if ("FIELD".equals(value(at, "value"))) {
+                                    String field = remap(references, c.name, (String)value(at, "target"));
+                                    int opcode = value(at, "opcode") instanceof Integer n ? n : -1;
+                                    boolean found = false;
+                                    for (var m : methods)
+                                        for (var insn : m.instructions)
+                                            if (insn instanceof FieldInsnNode access &&
+                                                ("L" + access.owner + ";" + access.name + ":" + access.desc).equals(field) &&
+                                                (opcode == -1 || opcode == access.getOpcode())) found = true;
+                                    require(found, "Exact field injection callsite " + field);
+                                }
+                            for (var at : ats)
                                 if ("INVOKE".equals(value(at, "value"))) {
                                     String callee = remap(references, c.name, (String)value(at, "target"));
                                     boolean found = false;

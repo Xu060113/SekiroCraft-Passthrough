@@ -276,11 +276,29 @@ int main(int argc, char **argv) {
     require(renderer.draw(c.Get(),target.Get(),dsv.Get(),camera,32,32,true),"vertical reprojection shader executes");
     pixel=read();
     require(pixel[0]>120 && pixel[1]>120 && pixel[2]<10,"look straight up retains world geometry and HUD");
+    // Skill cameras can roll while keeping the same forward vector. Both native
+    // camera ownership and world reprojection must use that final view basis.
+    auto rolled=vertical; ++rolled.meta.sequence;
+    rolled.meta.flags|=bridge::PackedAngles;
+    auto packAngle=[](float angle){return uint16_t(int16_t(std::lround(angle*32767/180)));};
+    rolled.meta.reserved=packAngle(37.f)|(uint32_t(packAngle(63.f))<<16);
+    require(bridge::valid(rolled.meta),"packed roll retains v3 metadata layout");
+    auto rolledPose=bridge::frameCameraPose(rolled.meta);
+    auto unrolledCamera=camera;
+    camera.view=*sc::inverse(rolledPose);
+    require(bridge::Compositor::matchesCamera(rolled.meta,camera),"roll and pole yaw match final native view");
+    require(!bridge::Compositor::matchesCamera(rolled.meta,unrolledCamera),"same forward with wrong roll is rejected");
+    require(renderer.upload(c.Get(),rolled),"rolled frame uploads");
+    c->ClearRenderTargetView(target.Get(),blue);
+    require(renderer.draw(c.Get(),target.Get(),dsv.Get(),camera,32,32,false),"rolled final camera composite executes");
+    pixel=read();require(pixel[0]>120 && pixel[1]>120,"rolled camera retains geometry and HUD");
+    auto badRoll=rolled.meta;badRoll.flags&=~bridge::ExplicitYaw;
+    require(!bridge::valid(badRoll),"packed orientation requires explicit yaw flag");
     // Completed-frame camera ownership removes the need to reconstruct moving
     // entities from an older depth map. Exercise separate walk/jump poses and a
     // moving avatar silhouette with sharp edges, rather than a full-screen plane.
     auto paired = f;
-    paired.meta.sequence = vertical.meta.sequence;
+    paired.meta.sequence = rolled.meta.sequence;
     paired.meta.flags = bridge::Overlay | bridge::ExplicitYaw;
     paired.meta.reserved = std::bit_cast<uint32_t>(180.f);
     paired.meta.forward[0] = paired.meta.forward[1] = 0;
@@ -455,6 +473,35 @@ int main(int argc, char **argv) {
     require(fixedDepth.capture(c.Get(), dsv.Get()) && fixedDepth.captures == 2,
             "the next known scene replaces the owned depth snapshot");
     renderFixedDepth(false);
+    bridge::DepthSnapshot cachedDepth;
+    require(cachedDepth.captureImmutable(c.Get(),fixedDepth.view(),41),"copy a sealed depth execution once");
+    for(int i=0;i<6;++i)
+        require(cachedDepth.captureImmutable(c.Get(),fixedDepth.view(),41),"reuse the same sealed execution across later batches");
+    require(cachedDepth.captures==1 && cachedDepth.reused==6,"seven immutable requests need one GPU depth copy");
+    auto renderCachedDepth=[&](bool visible){
+        c->ClearRenderTargetView(target.Get(),blue);
+        require(renderer.draw(c.Get(),target.Get(),cachedDepth.view(),camera,32,32,false),"composite cached sealed depth");
+        auto cachedPixel=read(7,16);
+        require(visible?cachedPixel[0]>250 && cachedPixel[2]<5:cachedPixel[2]>250 && cachedPixel[0]<5,
+                "immutable reuse preserves real block occlusion");
+    };
+    renderCachedDepth(false);
+    c->ClearDepthStencilView(dsv.Get(),D3D11_CLEAR_DEPTH,
+                            camera.projection.at(2,2)+camera.projection.at(3,2)/5,0);
+    require(fixedDepth.capture(c.Get(),dsv.Get()),"next command execution writes the same source view");
+    renderCachedDepth(false);
+    require(cachedDepth.captureImmutable(c.Get(),fixedDepth.view(),42) && cachedDepth.captures==2,
+            "a replay of the same view with a new execution revision refreshes the copy");
+    renderCachedDepth(true);
+    require(cachedDepth.capture(c.Get(),dsv.Get()) && cachedDepth.capture(c.Get(),dsv.Get()) && cachedDepth.captures==4,
+            "mutable native depth never uses the sealed-copy cache");
+    require(cachedDepth.captureImmutable(c.Get(),fixedDepth.view(),42) && cachedDepth.captures==5,
+            "mutable capture invalidates an earlier immutable association");
+    require(!cachedDepth.captureImmutable(deferred.Get(),fixedDepth.view(),42) &&
+            !cachedDepth.captureImmutable(c.Get(),fixedDepth.view(),0),"unexecuted or unversioned sources cannot hit the cache");
+    cachedDepth.reset();
+    require(cachedDepth.captureImmutable(c.Get(),fixedDepth.view(),42) && cachedDepth.captures==6,
+            "resource reset invalidates immutable reuse");
     fixedDepth.reset();
     require(!fixedDepth.view(), "resize releases the owned depth snapshot view");
     camera={sc::identity(),sc::perspective(1.1f,1,.05f,100),{0,0,0},{0,0,1},true};

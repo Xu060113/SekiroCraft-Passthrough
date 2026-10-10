@@ -43,14 +43,20 @@ class DepthSnapshot {
     Microsoft::WRL::ComPtr<ID3D11Texture2D> texture_;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilView> view_;
     D3D11_TEXTURE2D_DESC description_{};
+    Microsoft::WRL::ComPtr<ID3D11DepthStencilView> immutableSource_;
+    uint64_t immutableRevision_{};
   public:
     uint64_t captures{};
+    uint64_t reused{};
     ID3D11DepthStencilView *view() const { return view_.Get(); }
-    void reset() { view_.Reset(); texture_.Reset(); description_ = {}; }
+    void reset() { view_.Reset(); texture_.Reset(); description_ = {}; immutableSource_.Reset(); immutableRevision_=0; }
     bool capture(ID3D11DeviceContext *context, ID3D11DepthStencilView *source,bool recordDeferred=false) {
         if (!context || !source || (context->GetType() != D3D11_DEVICE_CONTEXT_IMMEDIATE &&
             !(recordDeferred && context->GetType()==D3D11_DEVICE_CONTEXT_DEFERRED)))
             return false;
+        // Mutable native depth always needs a new copy. A successful ordinary
+        // capture also invalidates any earlier immutable-source association.
+        immutableSource_.Reset(); immutableRevision_=0;
         Microsoft::WRL::ComPtr<ID3D11Resource> resource;
         source->GetResource(&resource);
         Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
@@ -81,6 +87,13 @@ class DepthSnapshot {
         }
         context->CopyResource(texture_.Get(), texture.Get());
         ++captures;
+        return true;
+    }
+    bool captureImmutable(ID3D11DeviceContext *context, ID3D11DepthStencilView *source,uint64_t revision) {
+        if(!context || !source || !revision || context->GetType()!=D3D11_DEVICE_CONTEXT_IMMEDIATE)return false;
+        if(immutableSource_.Get()==source && immutableRevision_==revision){++reused;return true;}
+        if(!capture(context,source))return false;
+        immutableSource_=source;immutableRevision_=revision;
         return true;
     }
 };

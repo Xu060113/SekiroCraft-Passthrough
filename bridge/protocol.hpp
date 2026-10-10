@@ -13,6 +13,7 @@ constexpr uint32_t magic = 0x31504253; // SBP1
 constexpr uint32_t version = 3, maxWidth = 1920, maxHeight = 1080;
 constexpr uint32_t maxPixels = maxWidth * maxHeight, slots = 3;
 constexpr uint32_t maxFrameBytes = maxPixels * 12;
+constexpr uint32_t cameraRollCapability = 1u << 14;
 enum Flags : uint32_t { Scene = 1, Focus = 2, Edit = 4, Menu = 8, Reset = 16, NativeDead = 32, NativeAction = 64, NativeUI=128, NativeGrapple=256, NativeCinematic=512 };
 enum Capabilities : uint32_t {
     CameraSync = 1,
@@ -22,7 +23,7 @@ enum Capabilities : uint32_t {
     NativeBlockCollision = 16,
     NativeCombat = 32
 };
-enum FrameFlags : uint32_t { BottomUp = 1, Overlay = 2, ExplicitYaw = 4 };
+enum FrameFlags : uint32_t { BottomUp = 1, Overlay = 2, ExplicitYaw = 4, PackedAngles = 8 };
 struct alignas(8) Control {
     uint64_t sequence{}, tickMs{}, epoch{};
     uint32_t flags{}, capabilities = CameraSync | Input | DepthComposite;
@@ -58,9 +59,10 @@ struct Frame {
 inline bool valid(const FrameMeta &m) {
     if ((m.guiGeneration && (!m.guiWidth || !m.guiHeight || m.guiWidth>16384 || m.guiHeight>16384)) ||
         !m.sequence || !m.epoch || !m.width || !m.height || m.width > maxWidth || m.height > maxHeight ||
-        m.width * uint64_t(m.height) > maxPixels || (m.flags & ~(BottomUp | Overlay | ExplicitYaw)))
+        m.width * uint64_t(m.height) > maxPixels || (m.flags & ~(BottomUp | Overlay | ExplicitYaw | PackedAngles)))
         return false;
-    if ((m.flags & ExplicitYaw) && (!std::isfinite(std::bit_cast<float>(m.reserved)) ||
+    if ((m.flags & PackedAngles) && !(m.flags & ExplicitYaw)) return false;
+    if ((m.flags & ExplicitYaw) && !(m.flags & PackedAngles) && (!std::isfinite(std::bit_cast<float>(m.reserved)) ||
         std::abs(std::bit_cast<float>(m.reserved))>360)) return false;
     for (auto f : m.eye)
         if (!std::isfinite(f) || std::abs(f) > 1e6f)
@@ -74,6 +76,14 @@ inline bool valid(const FrameMeta &m) {
     return norm > .99f && norm < 1.01f && std::isfinite(m.fovY) && m.fovY > .025f && m.fovY < 3.05f &&
            std::isfinite(m.aspect) && m.aspect >= .7f && m.aspect <= 4 && std::isfinite(m.nearZ) &&
            m.nearZ > 0 && std::isfinite(m.farZ) && m.farZ > m.nearZ && m.farZ <= 100000;
+}
+inline float frameYaw(const FrameMeta &m) {
+    if(m.flags & PackedAngles) return int16_t(m.reserved & 65535) * (180.f/32767);
+    if(m.flags & ExplicitYaw) return std::bit_cast<float>(m.reserved);
+    return std::atan2(-m.forward[0],-m.forward[2])*180/3.14159265358979323846f;
+}
+inline float frameRoll(const FrameMeta &m) {
+    return (m.flags & PackedAngles) ? int16_t(m.reserved >> 16) * (180.f/32767) : 0.f;
 }
 inline bool valid(const Control &c) {
     if (!c.sequence || !c.epoch || c.width == 0 || c.height == 0 || c.width > maxWidth ||
