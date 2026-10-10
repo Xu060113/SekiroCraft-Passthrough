@@ -102,6 +102,14 @@ final class TerrainGeometry {
         }
         return target-feet.minY;
     }
+    /** A sampled floor already penetrating the feet must not veto every vanilla pose.
+     * Movement still sees the complete surface and performs the existing bounded recovery. */
+    static boolean blocksPose(Surface surface,Box feet,Box query,long now,double stepHeight){
+        var box=surface.box();
+        if(!retained(now,surface.tick()) || !box.intersects(query))return false;
+        double rise=box.maxY-feet.minY;
+        return !(box.intersects(feet) && rise>0 && rise<=Math.min(.6,stepHeight)+1e-5);
+    }
     static BlockHitResult raycast(List<Surface> surfaces,long now,Vec3d start,Vec3d end){
         double dy=end.y-start.y;
         if(dy>=-1e-7)return null;

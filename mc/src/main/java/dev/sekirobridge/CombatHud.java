@@ -13,7 +13,7 @@ public final class CombatHud {
     }
     public static void render(DrawContext draw){
         var c=MinecraftClient.getInstance();var s=CombatBridge.snapshot();var pose=BridgeClient.state();
-        if(!BridgeClient.active() || c.player==null || c.options.hudHidden || c.player.isSpectator() ||
+        if(!BridgeClient.postureHudVisible() || !BridgeClient.active() || c.player==null || c.options.hudHidden || c.player.isSpectator() ||
            s==null || pose==null || s.epoch()!=pose.epoch() || !Protocol.fresh(NativeBridge.clockMs(),s.tick()))return;
         int x=c.getWindow().getScaledWidth()/2-50,y=c.getWindow().getScaledHeight()-62;
         if(!c.player.isCreative() && s.maxPosture()>0)

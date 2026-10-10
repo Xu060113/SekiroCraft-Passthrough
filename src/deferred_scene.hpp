@@ -92,13 +92,21 @@ struct SceneDraw {
     uint64_t score{};
     bool clearsDepth{};
     Microsoft::WRL::ComPtr<ID3D11DepthStencilView> cleanDepth;
+    bool effectWrite{};
 };
 inline bool validNativeSceneDraw(const SceneDraw &draw){
-    return !draw.clearsDepth && draw.depth && draw.camera.valid &&
+    return !draw.clearsDepth && !draw.effectWrite && draw.depth && draw.camera.valid &&
            draw.viewport.Width>0 && draw.viewport.Height>0 && draw.score>0;
 }
 inline bool validSceneCandidate(const SceneDraw &draw){
     return validNativeSceneDraw(draw) && draw.frame;
+}
+// A later batch from the same camera must not replace a pre-FX copy with the
+// original depth that the effect has already modified. A clear starts a new pass.
+inline bool inheritsCleanDepth(const SceneDraw &previous,const SceneDraw &next,bool cleared=false){
+    return !cleared && !previous.clearsDepth && !previous.effectWrite && !next.clearsDepth && !next.effectWrite && previous.cleanDepth &&
+           previous.depth.Get()==next.depth.Get() && previous.frame==next.frame &&
+           validSceneCandidate(next);
 }
 
 // The peer needs Scene before it can export its first image. Native readiness
@@ -136,13 +144,17 @@ struct SceneRecording {
             generation = currentGeneration;
             draws.clear();
         }
+        // One boundary per consecutive FX run is sufficient; particle systems
+        // can otherwise record thousands of identical markers every frame.
+        if(draw.effectWrite && !draws.empty() && draws.back().effectWrite &&
+           draw.depth.Get()==draws.back().depth.Get())return;
         // Preserve ordering when a command list changes views. Adjacent draws
         // with the same capture may be combined without losing camera changes.
-        if (!draw.clearsDepth && !draws.empty() && !draws.back().clearsDepth &&
+        if (!draw.clearsDepth && !draw.effectWrite && !draws.empty() && !draws.back().clearsDepth && !draws.back().effectWrite &&
             draws.back().depth.Get() == draw.depth.Get() &&
             draws.back().frame == draw.frame) {
             draw.score += draws.back().score;
-            if(!draw.cleanDepth)draw.cleanDepth=draws.back().cleanDepth;
+            if(!draw.cleanDepth && inheritsCleanDepth(draws.back(),draw))draw.cleanDepth=draws.back().cleanDepth;
             draws.back() = std::move(draw);
         } else
             draws.push_back(std::move(draw));

@@ -33,6 +33,7 @@ Copy-Item -LiteralPath "$projectRoot\docs\CINEMATIC_TEST.md","$projectRoot\docs\
 Copy-Item -LiteralPath "$projectRoot\docs\F5_RENDER_TEST.md","$projectRoot\docs\MODPACK.md" -Destination "$packageRoot\docs" -Force
 Copy-Item -LiteralPath "$projectRoot\docs\BOSS_HITBOX_TEST.md" -Destination "$packageRoot\docs" -Force
 Copy-Item -LiteralPath "$projectRoot\docs\SWORD_EFFECT_TEST.md" -Destination "$packageRoot\docs" -Force
+Copy-Item -LiteralPath "$projectRoot\docs\CROUCH_HUD_TEST.md" -Destination "$packageRoot\docs" -Force
 New-Item -ItemType Directory -Path "$packageRoot\config" -Force | Out-Null
 Copy-Item -LiteralPath "$projectRoot\config\minecraft-runtime.json" -Destination "$packageRoot\config" -Force
 Copy-Item -LiteralPath "$projectRoot\docs\OGRE_GRAPPLE_TEST.md" -Destination "$packageRoot\docs\OGRE_GRAPPLE_TEST.md" -Force
@@ -56,6 +57,8 @@ $manifest.pending+=@('live SlashBlade sword-wave and charge visual acceptance','
 $manifest.capabilities+=@('animated native main-model bone bounds with multipart rays, area overlap and body-distance validation')
 $manifest.capabilities+=@('owned-player void protection and movement hold across native map loading with stable pose reseed')
 $manifest.capabilities+=@('explicit MC HUD and first-person hand recovery command')
+$manifest.capabilities+=@('scoped native-floor pose fit preserving vanilla crouch and ceiling rules','persistent independent posture HUD visibility commands','third-person local player crouch composed after weapon animation with skin transforms','pre-FX depth protection for every D3D11 graphics draw entry point and pure FX lists')
+$manifest.pending+=@('user live third-person crouch, native floor support and posture HUD toggle/restart acceptance','user live native enemy hit, particle FX flicker and wall occlusion acceptance')
 $manifest.pending+=@('live HUD recovery command and bridge activation visibility acceptance')
 $manifest.pending+=@('live Reflection of Strength teleport/loading survival and resumed native damage acceptance')
 $manifest.pending+=@('user live per-Boss body-part hit acceptance','assembly-only body meshes and detached scripted Boss components')

@@ -10,7 +10,7 @@ if($LASTEXITCODE){throw 'Native control fixture failed'}
 if($LASTEXITCODE){throw 'Java/JNI protocol test failed'}
 & java '-cp' "$projectRoot\mc\build\classes\java\main" 'dev.sekirobridge.InputForwarderSelfTest'
 if($LASTEXITCODE){throw 'Production input replay regression failed'}
-foreach($test in @('AudioBridgeSelfTest','CombatSelfTest','NativeLoadSelfTest')){
+foreach($test in @('AudioBridgeSelfTest','CombatSelfTest','NativeLoadSelfTest','HudPreferencesSelfTest')){
     & java '-cp' "$projectRoot\mc\build\classes\java\main" "dev.sekirobridge.$test"
     if($LASTEXITCODE){throw "$test failed"}
 }
@@ -33,6 +33,14 @@ if(!$gameJar -or !$asmJars.Count){throw 'Mapped game or ASM dependency missing; 
 $gsonJar=Get-ChildItem -LiteralPath "$projectRoot\.cache\gradle-home\caches\modules-2\files-2.1\com.google.code.gson\gson" -Recurse -File -Filter '*.jar'|Where-Object Name -NotLike '*sources*'|Select-Object -First 1
 if(!$gsonJar){throw 'Gson dependency missing'}
 $verificationClasspath=(@($asmJars)+@($gsonJar.FullName)) -join ';'
+& javac '-cp' "$verificationClasspath;$($gameJar.FullName);$projectRoot\mc\build\classes\java\main" '-d' $buildRoot "$projectRoot\tests\VanillaSneak.java"
+if($LASTEXITCODE){throw 'Vanilla pose regression fixture build failed'}
+& java '-cp' "$verificationClasspath;$($gameJar.FullName);$projectRoot\mc\build\classes\java\main;$buildRoot" 'dev.sekirobridge.VanillaSneak' $gameJar.FullName
+if($LASTEXITCODE){throw 'Vanilla crouch and scoped native floor regression failed'}
+& javac '-cp' "$verificationClasspath" '-d' $buildRoot "$projectRoot\tests\CrouchModel.java"
+if($LASTEXITCODE){throw 'Third-person crouch model fixture build failed'}
+& java '-cp' "$verificationClasspath;$buildRoot" 'dev.sekirobridge.CrouchModel' $gameJar.FullName "$projectRoot\mc\build\classes\java\main"
+if($LASTEXITCODE){throw 'Vanilla crouch model and weapon-layer composition checks failed'}
 & javac '-cp' "$verificationClasspath;$projectRoot\mc\build\classes\java\main" '-d' $buildRoot "$projectRoot\tests\NativeLoadPlayer.java"
 if($LASTEXITCODE){throw 'Native map-load player fixture build failed'}
 & java '-cp' "$verificationClasspath;$projectRoot\mc\build\classes\java\main;$buildRoot" 'dev.sekirobridge.NativeLoadPlayer' "$projectRoot\mc\build\classes\java\main"

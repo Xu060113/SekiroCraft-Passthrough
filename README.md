@@ -6,7 +6,7 @@
 
 当前版本：`0.1.0`；补丁：`gameplay5-defense-render`；通信协议：`v3`。这是持续开发的版本，离线检查通过不代表所有场景和 Boss 都已完成实机验收。
 
-2026-10-09 更新包含大型 Boss 动画部位受击判定、拔刀剑加法剑气显示、再战强者传送加载保护及第一人称界面恢复入口，详见 [更新日志](CHANGELOG.md)。用户确认本轮游戏测试完成并授权同步；新增 HUD 恢复命令的单独实机记录及不同地图、Boss、第三方模组的覆盖情况见更新日志。MC 自定义忍杀动作与结算接口目前处于 [方案设计](docs/MC_DEATHBLOW_DESIGN.md) 阶段，尚未替代自动扣红点。后续 GitHub 提交和推送仍需先经过用户游戏测试及上传授权。
+2026-10-10 更新补充第三人称下蹲与武器动画合成、可保存的姿态条显示开关，并扩大受击特效深度保护范围。**用户实机反馈受击时 MC 人物和方块仍会闪烁，尚待后续修复。** 本轮已由用户测试并授权上传；各场景覆盖情况与已知问题见 [更新日志](CHANGELOG.md)。MC 自定义忍杀动作与结算接口目前处于 [方案设计](docs/MC_DEATHBLOW_DESIGN.md) 阶段，尚未替代自动扣红点。后续 GitHub 提交和推送仍需先经过用户游戏测试及上传授权。一键安装程序与记事本教程正在准备，当前下载包仍按下面的脚本步骤部署。
 
 可下载的桥接安装包和 MC 环境配置包见 [Releases](https://github.com/Xu060113/SekiroCraft-Passthrough/releases)。当前 **Fabric Loader 0.19.5 + Fabric API 0.92.12** 配置、模组的精确版本及原作者下载链接见 [MC 配置与模组](docs/MODPACK.md)。
 
@@ -15,6 +15,7 @@
 | 功能 | 当前行为 |
 | --- | --- |
 | MC 操作 | 移动、跳跃、疾跑、潜行、创造飞行、背包、合成、方块、红石、第一/第三人称由真实 MC 处理 |
+| 下蹲与姿态条 | 下蹲修复保留 MC 姿态与碰撞规则，并在武器动画之后合成第三人称下蹲；`/sekirobridge stamina on/off/toggle` 控制桥接姿态条显示并保存设置，见 [验收步骤](docs/CROUCH_HUD_TEST.md) |
 | F5 人物显示 | 匹配枪械模组修改后的实际深度格式，避免世界层复制失败；回归步骤见 [F5 验收](docs/F5_RENDER_TEST.md) |
 | 原生地面 | 采样附近地面，支持放置第一块方块、生物蛋以及附近 MC 实体的地面碰撞 |
 | 投射物 | MC 方块和实体命中保留；原生场景使用射线检测，敌人通过不可见 MC 代理接收命中 |
@@ -132,6 +133,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File 'C:\Mods\SekiroCraft-Pas
 4. 切换到只狼窗口，使用 MC 操作。若正在只狼菜单输入模式，按 F6 返回 MC 控制。
 5. 用 `/sekirobridge status` 检查连接；停止桥接执行 `/sekirobridge off`。
 
+新增的 MC 耐力条实际显示的是只狼**姿态值**。`/sekirobridge stamina off` 隐藏桥接添加的自己与目标姿态条，`/sekirobridge stamina on` 显示，`/sekirobridge stamina toggle` 切换；仅输入 `/sekirobridge stamina` 可查看当前开关。默认显示，设置保存到该 MC 游戏目录的 `sekirobridge/bridge.properties`（`show_posture_hud`），重启后保留。它不改变姿态、伤害、血条或物品栏；F1 和 `/sekirobridge hud` 继续控制原版界面可见性。
+
 两端默认共享内存通道均为 `default`；使用同一 Windows 登录会话运行，两端设置必须一致。通信不需要开放网络端口。
 
 | 按键 | 功能 |
@@ -214,7 +217,7 @@ git pull --ff-only
 - **钩索与相机交接仍需实机验收。** 当前读取原生动作状态、仅在确认钩索时跟随位移，不套用固定等待时间；史蒂夫没有只狼忍杀/钩索动作动画。
 - **存档与地图独立。** MC 方块由真实单人世界保存，不转换原创版本 SCW 存档。尚无地图或存档槽自动绑定，切换地图应单独校准。
 - **高度范围。** `sekirobridge.ini` 的 `y_offset` 默认为 128。桥接角色与原生代理不再因 MC 的固定虚空高度线误伤，但可放方块的高度仍受 MC 世界范围限制。修改偏移不会自动搬动已放置的方块。
-- **画面不可见/闪烁。** 用 F7 查看连接与提交状态，确认两端协议匹配、MC 在单人世界且桥接已开启。先在无其他渲染模组的 Fabric 实例复现，保留日志后正常退出。
+- **画面不可见/闪烁。** 2026-10-10 更新仍有敌人命中时人物和方块闪烁的实机反馈，后续继续修复。用 F7 查看连接与提交状态，确认两端协议匹配、MC 在单人世界且桥接已开启。先在无其他渲染模组的 Fabric 实例复现，保留日志后正常退出。
 - **背包或只狼菜单点击无效。** 先用 F6 确认输入归属；检查是否误按 F8 暂停 MC 输入。报告当时界面、分辨率、缩放、操作步骤，避免仅描述“点不到”。
 - **第一人称手臂和状态栏同时消失，但方块与背包正常。** 先按 F1 检查是否启用了 MC 的隐藏界面开关；也可在 MC 执行 `/sekirobridge hud` 显式恢复状态栏与手部渲染，单独玩 MC 时也可使用。`/sekirobridge on` 会恢复可见界面，之后仍可用 F1 手动隐藏；状态命令会显示 `hudHidden` 和当前视角。若恢复后仍不可见，请区分 MC 窗口与只狼窗口的表现。
 - **无 MC 音效。** 检查 Windows 音量混合器中的 Java/Minecraft 和 MC 声音设置；声音来自后台 MC，不由只狼端播放。
@@ -228,6 +231,7 @@ git pull --ff-only
 | 文档 | 内容 |
 | --- | --- |
 | [CHANGELOG.md](CHANGELOG.md) | 本轮功能、修复、测试记录与保留的限制 |
+| [CROUCH_HUD_TEST.md](docs/CROUCH_HUD_TEST.md) | 桥接第三人称下蹲、姿态条显示开关与受击闪烁验收 |
 | [BOSS_HITBOX_TEST.md](docs/BOSS_HITBOX_TEST.md) | 大型敌人动画部位受击判定与回退行为 |
 | [SWORD_EFFECT_TEST.md](docs/SWORD_EFFECT_TEST.md) | 拔刀剑加法剑气的画面合成与遮挡 |
 | [MODPACK.md](docs/MODPACK.md) | 当前 Fabric 版本、模组下载、环境配置包与升级步骤 |

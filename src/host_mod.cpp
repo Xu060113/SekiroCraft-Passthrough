@@ -23,6 +23,10 @@ using Present = HRESULT(STDMETHODCALLTYPE *)(IDXGISwapChain *, UINT, UINT);
 using Resize = HRESULT(STDMETHODCALLTYPE *)(IDXGISwapChain *, UINT, UINT, UINT, DXGI_FORMAT, UINT);
 using DrawIndexed = void(STDMETHODCALLTYPE *)(ID3D11DeviceContext *, UINT, UINT, INT);
 using DrawInstanced = void(STDMETHODCALLTYPE *)(ID3D11DeviceContext *, UINT, UINT, UINT, INT, UINT);
+using DrawVertices = void(STDMETHODCALLTYPE *)(ID3D11DeviceContext *, UINT, UINT);
+using DrawVertexInstances = void(STDMETHODCALLTYPE *)(ID3D11DeviceContext *, UINT, UINT, UINT, UINT);
+using DrawIndirect = void(STDMETHODCALLTYPE *)(ID3D11DeviceContext *, ID3D11Buffer *, UINT);
+using DrawAutomatic = void(STDMETHODCALLTYPE *)(ID3D11DeviceContext *);
 using Targets = void(STDMETHODCALLTYPE *)(ID3D11DeviceContext *, UINT, ID3D11RenderTargetView *const *,
                                           ID3D11DepthStencilView *);
 using TargetsUav = void(STDMETHODCALLTYPE *)(ID3D11DeviceContext *, UINT, ID3D11RenderTargetView *const *,
@@ -36,6 +40,10 @@ Present originalPresent{};
 Resize originalResize{};
 DrawIndexed originalDraw[2]{};
 DrawInstanced originalInstanced[2]{};
+DrawVertices originalVertices[2]{};
+DrawVertexInstances originalVertexInstances[2]{};
+DrawIndirect originalIndexedIndirect[2]{}, originalVertexIndirect[2]{};
+DrawAutomatic originalAuto[2]{};
 Targets originalTargets[2]{};
 TargetsUav originalTargetsUav[2]{};
 Viewports originalViewports[2]{};
@@ -120,6 +128,7 @@ struct App {
     sc::Camera snapshotCamera;
     uint64_t snapshotAt=UINT64_MAX;
     bool immediateDirty{};
+    bool sceneDepthCleared{};
     std::array<std::shared_ptr<bridge::Frame>,16> cameraHistory;
     // Deferred contexts only lock short CPU metadata work. Present's uploads,
     // GPU copies, input polling and log I/O cannot discard their command lists.
@@ -581,7 +590,10 @@ bool captureSceneDepth(ID3D11DeviceContext *context) {
     if (!a.sceneDepth || !a.sceneFrame || a.depthFrame != a.frames ||
         !bridge::Compositor::matchesCamera(a.sceneFrame->meta, a.sceneCamera))
         return false;
-    if (!a.sceneSnapshot.capture(context, a.sceneCleanDepth?a.sceneCleanDepth.Get():a.sceneDepth.Get())) {
+    auto *source=a.sceneCleanDepth?a.sceneCleanDepth.Get():a.sceneDepth.Get();
+    // Immediate FX sealing may already own this exact snapshot. CopyResource
+    // cannot copy a resource onto itself, and the immutable copy needs no refresh.
+    if (source!=a.sceneSnapshot.view() && !a.sceneSnapshot.capture(context, source)) {
         ++a.snapshotFailures;
         a.snapshotFrame.reset();
         a.snapshotAt = UINT64_MAX;
@@ -603,9 +615,11 @@ void flushImmediateDepth(ID3D11DeviceContext *context) {
 void submitSceneDraw(const bridge::SceneDraw &draw) {
     auto &a = *app;
     a.sceneReadiness.observe(draw,a.frames);
+    if(draw.effectWrite)return;
     if (draw.clearsDepth) {
         a.depthScores.erase(draw.depth.Get());
         if (a.sceneDepth.Get() == draw.depth.Get()) {
+            a.sceneDepthCleared=true;
             if(!a.sceneCleanDepth){a.sceneFrame.reset();a.sceneCamera={};}
             a.bestDepthScore = 0;
         }
@@ -615,9 +629,14 @@ void submitSceneDraw(const bridge::SceneDraw &draw) {
     auto &score = a.depthScores[draw.depth.Get()];
     score += draw.score;
     if (score >= a.bestDepthScore) {
+        bridge::SceneDraw previous{a.sceneDepth,a.sceneViewport,a.sceneCamera,a.sceneFrame,a.bestDepthScore};
+        previous.cleanDepth=a.sceneCleanDepth;
+        auto clean=draw.cleanDepth;
+        if(!clean && bridge::inheritsCleanDepth(previous,draw,a.sceneDepthCleared))clean=previous.cleanDepth;
         a.bestDepthScore = score;
         a.sceneDepth = draw.depth;
-        a.sceneCleanDepth = draw.cleanDepth;
+        a.sceneCleanDepth = clean;
+        a.sceneDepthCleared=false;
         a.sceneViewport = draw.viewport;
         a.depthFrame = a.frames;
         a.sceneCamera = draw.camera;
@@ -723,9 +742,21 @@ void prepareEffectDraw(ID3D11DeviceContext *context){
         if(!d.DepthEnable || d.DepthWriteMask==D3D11_DEPTH_WRITE_MASK_ZERO)return;}
     withRecording(context,[&]{
         auto &a=*app;
-        if(context->GetType()==D3D11_DEVICE_CONTEXT_IMMEDIATE){flushImmediateDepth(context);return;}
-        auto bound=a.bindings.find(context);auto recording=a.recordings.find(context);
-        if(bound!=a.bindings.end() && recording!=a.recordings.end())recording->second.sealDepth(context,bound->second.depth.Get());
+        if(context->GetType()==D3D11_DEVICE_CONTEXT_IMMEDIATE){
+            flushImmediateDepth(context);
+            if(a.snapshotAt==a.frames && a.snapshotFrame==a.sceneFrame && !a.sceneDepthCleared)
+                a.sceneCleanDepth=a.sceneSnapshot.view();
+            return;
+        }
+        auto bound=a.bindings.find(context);
+        if(bound!=a.bindings.end() && bound->second.depth){
+            auto &record=a.recordings[context];
+            // A pure FX command list may contain no opaque draw of its own.
+            // Its metadata still protects the earlier executed scene snapshot.
+            if(record.generation==a.recordingGeneration.load())record.sealDepth(context,bound->second.depth.Get());
+            bridge::SceneDraw effect;effect.depth=bound->second.depth;effect.effectWrite=true;
+            record.record(a.recordingGeneration.load(),std::move(effect));
+        }
     });
 }
 template <int I>
@@ -778,8 +809,15 @@ void STDMETHODCALLTYPE hookExecuteCommands(ID3D11DeviceContext *context, ID3D11C
     auto captured = bridge::DeferredScene::read(list);
     {
         std::unique_lock guard(appMutex, std::try_to_lock);
-        if (guard.owns_lock())
+        if (guard.owns_lock()){
             flushImmediateDepth(context);
+            auto &a=*app;
+            if(captured && captured->resourceEpoch==a.resourceEpoch && a.snapshotAt==a.frames &&
+               a.snapshotFrame==a.sceneFrame && !a.sceneDepthCleared &&
+               std::any_of(captured->draws.begin(),captured->draws.end(),[&](const auto &draw){
+                   return draw.effectWrite && draw.depth.Get()==a.sceneDepth.Get();
+               }))a.sceneCleanDepth=a.sceneSnapshot.view();
+        }
     }
     originalExecuteCommands[I](context, list, restore);
     std::unique_lock guard(appMutex, std::try_to_lock);
@@ -872,6 +910,30 @@ void STDMETHODCALLTYPE hookDraw(ID3D11DeviceContext *context, UINT count, UINT s
             recordDraw(context, count);
             });
     }
+}
+// Particle quads, stream-output and indirect FX do not necessarily use indexed
+// drawing. Protect the scene before every D3D11 graphics draw entry point.
+template<int I> void STDMETHODCALLTYPE hookVertices(ID3D11DeviceContext *context,UINT count,UINT start){
+    if(!inMod && ready){Flag flag;prepareEffectDraw(context);}
+    originalVertices[I](context,count,start);
+    if(!inMod && ready){Flag flag;withRecording(context,[&]{recordDraw(context,count);});}
+}
+template<int I> void STDMETHODCALLTYPE hookVertexInstances(ID3D11DeviceContext *context,UINT count,UINT instances,UINT start,UINT first){
+    if(!inMod && ready){Flag flag;prepareEffectDraw(context);}
+    originalVertexInstances[I](context,count,instances,start,first);
+    if(!inMod && ready){Flag flag;withRecording(context,[&]{recordDraw(context,count);});}
+}
+template<int I> void STDMETHODCALLTYPE hookIndexedIndirect(ID3D11DeviceContext *context,ID3D11Buffer *args,UINT offset){
+    if(!inMod && ready){Flag flag;prepareEffectDraw(context);}
+    originalIndexedIndirect[I](context,args,offset);
+}
+template<int I> void STDMETHODCALLTYPE hookVertexIndirect(ID3D11DeviceContext *context,ID3D11Buffer *args,UINT offset){
+    if(!inMod && ready){Flag flag;prepareEffectDraw(context);}
+    originalVertexIndirect[I](context,args,offset);
+}
+template<int I> void STDMETHODCALLTYPE hookAuto(ID3D11DeviceContext *context){
+    if(!inMod && ready){Flag flag;prepareEffectDraw(context);}
+    originalAuto[I](context);
 }
 HRESULT STDMETHODCALLTYPE hookPresent(IDXGISwapChain *swap, UINT interval, UINT flags) {
     if (inMod || !ready || flags & DXGI_PRESENT_TEST)
@@ -979,6 +1041,7 @@ HRESULT STDMETHODCALLTYPE hookPresent(IDXGISwapChain *swap, UINT interval, UINT 
         ++a.frames;
         a.immediateDirty=false;
         a.sceneFrame.reset();a.sceneCamera={};a.sceneCleanDepth.Reset();
+        a.sceneDepthCleared=false;
         a.depthScores.clear();
         a.bestDepthScore = 0;
     } catch (const std::exception &e) {

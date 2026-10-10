@@ -34,6 +34,18 @@ public final class BridgeClient implements ClientModInitializer {
     private static final InputForwarder INPUT = new InputForwarder();
     private static final PlayerSync PLAYERS = new PlayerSync();
     private static final PhysicsExporter PHYSICS = new PhysicsExporter();
+    private static HudPreferences hudPreferences;
+    public static boolean postureHudVisible(){return hudPreferences==null || hudPreferences.visible();}
+    private static int setPostureHud(net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource source,boolean visible){
+        if(hudPreferences==null){source.sendError(Text.literal("界面设置尚未初始化。"));return 0;}
+        try{hudPreferences.setVisible(visible);}
+        catch(java.io.IOException | IllegalArgumentException e){
+            LOG.warn("Could not save posture HUD preference",e);
+            source.sendError(Text.literal("无法保存姿态条设置，请检查 MC 游戏目录是否可写。"));return 0;
+        }
+        source.sendFeedback(Text.literal("MC 姿态条（耐力条）已"+(visible?"显示":"隐藏")+"，设置已保存。"));
+        return Command.SINGLE_SUCCESS;
+    }
     public static Protocol.State state() { return state; }
     public static Protocol.State renderPose(){return renderPose;}
     public static void renderPose(Protocol.State pose){renderPose=pose;}
@@ -140,6 +152,9 @@ public final class BridgeClient implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         var client = MinecraftClient.getInstance();
+        hudPreferences=new HudPreferences(client.runDirectory.toPath().resolve("sekirobridge/bridge.properties"));
+        try{hudPreferences.load();}
+        catch(java.io.IOException | IllegalArgumentException e){LOG.warn("Could not read HUD settings; using visible posture HUD",e);}
         CombatBridge.initialize();
         try {
             var root = client.runDirectory.toPath().resolve("sekirobridge");
@@ -201,11 +216,19 @@ public final class BridgeClient implements ClientModInitializer {
                             ctx.getSource().sendFeedback(Text.literal("Minecraft HUD and first-person hand rendering enabled. F1 toggles HUD visibility."));
                             return Command.SINGLE_SUCCESS;
                         }))
+                        .then(literal("stamina")
+                            .executes(ctx->{ctx.getSource().sendFeedback(Text.literal("MC 姿态条（耐力条）："+
+                                (postureHudVisible()?"显示":"隐藏")+"。使用 /sekirobridge stamina on、off 或 toggle。"));return Command.SINGLE_SUCCESS;})
+                            .then(literal("on").executes(ctx->setPostureHud(ctx.getSource(),true)))
+                            .then(literal("off").executes(ctx->setPostureHud(ctx.getSource(),false)))
+                            .then(literal("toggle").executes(ctx->setPostureHud(ctx.getSource(),!postureHudVisible()))))
                         .then(literal("status").executes(ctx -> {
                             ctx.getSource().sendFeedback(
                                 Text.literal("JNI=" + (handle != 0) + " armed=" + armed +
                                              " active=" + active() + " loading="+loading()+" terrainReady=" + NativeTerrain.ready() +
                                              " hudHidden="+client.options.hudHidden+" view="+client.options.getPerspective()+
+                                             " postureHud="+postureHudVisible()+" sneak="+(client.player!=null && client.player.isSneaking())+
+                                             " pose="+(client.player==null?"none":client.player.getPose())+
                                              " frames=" + FRAMES.published+" audio="+AudioBridge.status()+" combat="+CombatBridge.status()));
                             return Command.SINGLE_SUCCESS;
                         }))));

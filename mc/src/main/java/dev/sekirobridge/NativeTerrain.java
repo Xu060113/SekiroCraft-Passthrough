@@ -74,8 +74,11 @@ public final class NativeTerrain {
         var current=available();
         if(!applies(current,entity) || world!=entity.getWorld())return original;
         long now=NativeBridge.clockMs();
+        boolean poseProbe=entity instanceof PlayerEntity && entity.getUuid().equals(current.player()) &&
+            TerrainPoseProbe.active(entity);
         ArrayList<VoxelShape> shapes=null;
         for(var surface:current.surfaces())if(TerrainGeometry.retained(now,surface.tick()) && surface.box().intersects(query)){
+            if(poseProbe && !TerrainGeometry.blocksPose(surface,entity.getBoundingBox(),query,now,entity.getStepHeight()))continue;
             if(shapes==null){shapes=new ArrayList<>();for(var shape:original)shapes.add(shape);}
             shapes.add(VoxelShapes.cuboid(surface.box()));
         }

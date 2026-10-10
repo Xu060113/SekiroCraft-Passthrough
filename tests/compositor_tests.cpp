@@ -477,6 +477,49 @@ int main(int argc, char **argv) {
     c->ClearRenderTargetView(target.Get(),blue);
     require(renderer.draw(c.Get(),target.Get(),dsv.Get(),camera,32,32,false,false),"compare contaminated attack effect depth");
     require(read()[2]>250,"contaminated original depth reproduces the old MC disappearance");
+    bridge::SceneDraw laterGeometry{dsv,{0,0,32,32,0,1},camera,effectFrame,2000};
+    require(bridge::inheritsCleanDepth(effectRecording.draws[0],laterGeometry),
+            "later opaque batch inherits the pre-FX copy instead of contaminated native depth");
+    laterGeometry.cleanDepth=effectRecording.draws[0].cleanDepth;
+    c->ClearRenderTargetView(target.Get(),blue);
+    require(renderer.draw(c.Get(),target.Get(),laterGeometry.cleanDepth.Get(),camera,32,32,false,false),
+            "compose later native geometry using the inherited clean depth");
+    require(read()[0]>250,"MC blocks and avatar stay visible after an attack FX and subsequent opaque batch");
+    require(!bridge::inheritsCleanDepth(effectRecording.draws[0],laterGeometry,true),
+            "a real native depth clear starts a new geometry pass");
+    auto changedFrame=laterGeometry;changedFrame.frame=std::make_shared<bridge::Frame>(f);
+    require(!bridge::inheritsCleanDepth(effectRecording.draws[0],changedFrame),
+            "different capture cannot inherit another camera's depth");
+    auto changedDepth=laterGeometry;changedDepth.depth.Reset();
+    require(!bridge::inheritsCleanDepth(effectRecording.draws[0],changedDepth),
+            "different native depth attachment does not reuse a sealed pass");
+    bridge::SceneRecording continued;
+    continued.record(1,effectRecording.draws[0]);
+    auto followup=laterGeometry;followup.cleanDepth.Reset();
+    continued.record(1,followup);
+    require(continued.draws.size()==1 && continued.draws[0].cleanDepth==laterGeometry.cleanDepth,
+            "same-list later geometry retains the pre-effect snapshot");
+    bridge::SceneDraw realClear;realClear.depth=dsv;realClear.clearsDepth=true;
+    continued.record(1,realClear);continued.record(1,followup);
+    require(continued.draws.size()==3 && !continued.draws.back().cleanDepth,
+            "same-list clear boundary releases the old scene snapshot for the next pass");
+    bridge::SceneDraw pureEffect;pureEffect.depth=dsv;pureEffect.effectWrite=true;
+    bridge::SceneRecording effectsOnly;effectsOnly.record(1,pureEffect);
+    effectsOnly.record(1,pureEffect);
+    require(effectsOnly.draws.size()==1,"consecutive particles share one metadata boundary without unbounded markers");
+    require(!bridge::validNativeSceneDraw(pureEffect) && !bridge::validSceneCandidate(pureEffect),
+            "a pure FX list cannot nominate scene readiness, camera or world depth");
+    require(SUCCEEDED(deferred->FinishCommandList(FALSE,&effectList)) &&
+            bridge::DeferredScene::attach(effectList.Get(),7,std::move(effectsOnly.draws)),
+            "deferred effect-only command list retains depth-write metadata");
+    auto fxMetadata=bridge::DeferredScene::read(effectList.Get());
+    require(fxMetadata && fxMetadata->draws.size()==1 && fxMetadata->draws[0].effectWrite &&
+            fxMetadata->draws[0].depth.Get()==dsv.Get(),
+            "execution can seal a prior scene even when this list has no opaque geometry");
+    bridge::SceneRecording separated;separated.record(1,laterGeometry);separated.record(1,pureEffect);
+    separated.record(1,followup);
+    require(separated.draws.size()==3 && !separated.draws.back().cleanDepth,
+            "effect markers retain command ordering rather than merging with an opaque batch");
     if (argc > 1) {
         std::ifstream file(argv[1], std::ios::binary);
         auto captured = empty;
