@@ -11,8 +11,8 @@ using System.Web.Script.Serialization;
 
 namespace SekiroCraftSetup {
     public sealed class BundleInfo {
-        public string version, sourceCommit, gameSha256, jarName, apiName, forgeJarName, forgeNativeName;
-        public bool gameTested, flickerResolved;
+        public string version, sourceCommit, gameSha256, jarName, apiName, forgeJarName, forgeNativeName, forgeVersion, fabricVersion;
+        public bool gameTested, flickerResolved, forgeGameTested, fabricGameTested;
         public Dictionary<string,string> files;
     }
     public sealed class Bundle {
@@ -262,7 +262,8 @@ namespace SekiroCraftSetup {
             var propertiesText=File.Exists(properties)?File.ReadAllText(properties,latin):"# SekiroCraft bridge settings\r\n";
             plan.Changes.Add(new Change { Root="mc",Name="sekirobridge/bridge.properties",Bytes=latin.GetBytes(SetProperties(propertiesText,new Dictionary<string,string> { {"channel","default"},{"gui_trace","false"} })) });
             plan.Changes.Add(new Change { Root="mc",Name="SekiroCraft-简易教程.txt",Bytes=bundle.Files["简易教程.txt"] });
-            plan.Notes.Add(isForge?"安装已测试的 Forge preview.6 JAR 与配套只狼 DLL；不安装 Fabric API，不包含血条位置切换。":"安装原有已发布 Fabric 0.1.0 成对 DLL/JAR 与 Fabric API 0.92.12；Fabric 模组本次不升级。");
+            plan.Notes.Add(isForge?"安装 Forge "+bundle.Info.forgeVersion+" 成对 DLL/JAR；不安装 Fabric API，不包含血条位置切换。":"安装 Fabric "+bundle.Info.fabricVersion+" 成对 DLL/JAR 与 Fabric API 0.92.12。");
+            plan.Notes.Add((isForge?bundle.Info.forgeGameTested:bundle.Info.fabricGameTested)?"所选版本已有用户游戏测试记录；其它模组组合仍需验证。":"所选版本通过离线检查，尚未单独完成用户游戏测试。");
             plan.Notes.Add(settings.AutoBoss?"已选 Boss 血量耗尽扣红点（临时方案，完整 MC 忍杀尚未实现）。":"未启用自动扣红点；Boss 可能无法通过 MC 攻击推进阶段。");
             plan.Notes.Add("已知问题：只狼攻击命中时，MC 人物/方块仍可能闪烁，后续继续修复。");
             return plan;

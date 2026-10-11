@@ -11,9 +11,9 @@ import net.minecraft.util.math.Vec3d;
 /** Bounded asynchronous native segments; JNI transport remains on the client thread. */
 public final class ProjectileTerrain {
     public record Ticket(long id,long epoch,long created,Vec3d start,Vec3d end){}
-    private record Result(boolean hit,Vec3d position,Vec3d normal){}
+    public record Contact(boolean hit,Vec3d position,Vec3d normal,long tick){}
     private static final ConcurrentHashMap<Long,Ticket> pending=new ConcurrentHashMap<>();
-    private static final ConcurrentHashMap<Long,Result> completed=new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<Long,Contact> completed=new ConcurrentHashMap<>();
     private static final AtomicLong ids=new AtomicLong();
     private static long sequence;
     private static final java.nio.ByteBuffer queries=Protocol.direct(2080),hits=Protocol.direct(2592);
@@ -31,6 +31,8 @@ public final class ProjectileTerrain {
             t.start().squaredDistanceTo(start)<1e-8 && t.end().squaredDistanceTo(end)<1e-8;
     }
     public static boolean waiting(Ticket t){return t!=null && !completed.containsKey(t.id()) && NativeBridge.clockMs()-t.created()<350;}
+    /** A confirmed miss is an answer; null means transport has not answered yet. */
+    public static Contact contact(Ticket t){return t==null?null:completed.get(t.id());}
     public static BlockHitResult result(Ticket t){
         if(t==null)return null;var r=completed.get(t.id());
         return r==null || !r.hit()?null:new BlockHitResult(r.position(),Direction.getFacing(r.normal().x,r.normal().y,r.normal().z),
@@ -52,7 +54,7 @@ public final class ProjectileTerrain {
                 var position=new Vec3d(state.mcX(hits.getFloat(at+8)),state.mcY(hits.getFloat(at+12)),state.mcZ(hits.getFloat(at+16)));
                 var normal=new Vec3d(hits.getFloat(at+20),hits.getFloat(at+24),-hits.getFloat(at+28));
                 if(found && !validHit(ticket.start(),ticket.end(),position,normal,state.scale()))continue;
-                completed.putIfAbsent(id,new Result(found,position,normal));
+                completed.putIfAbsent(id,new Contact(found,position,normal,hits.getLong(8)));
             }
         }
         pending.forEach((id,t) -> {if(t.epoch()!=state.epoch() || now-t.created()>1500){pending.remove(id);completed.remove(id);}});

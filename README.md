@@ -4,23 +4,23 @@
 
 本项目同时运行 **Minecraft 1.20.1（Fabric 或独立 Forge 版）与只狼**：Minecraft 负责人物操作和游戏逻辑，只狼提供场景、原生敌人和钩索；通过共享内存、JNI 与 D3D11 合成画面和同步状态。它不是把 Minecraft 反编译成 C++，也不是完整移植。原创 C++ 方块版本独立保留，本仓库只包含双进程桥接版本。
 
-当前版本：`0.1.0`；补丁：`gameplay5-defense-render`；通信协议：`v3`。这是持续开发的版本，离线检查通过不代表所有场景和 Boss 都已完成实机验收。
+当前版本：`0.1.1`（Fabric 0.1.1 / Forge 0.1.1-forge-preview.7）；补丁：`entity-terrain`；通信协议：`v3`。这是持续开发的版本，离线检查通过不代表所有场景和 Boss 都已完成实机验收。
 
-2026-10-10 更新补充第三人称下蹲与武器动画合成、可保存的姿态条显示开关，并扩大受击特效深度保护范围。**用户实机反馈受击时 MC 人物和方块仍会闪烁，尚待后续修复。** 本轮已由用户测试并授权上传；各场景覆盖情况与已知问题见 [更新日志](CHANGELOG.md)。MC 自定义忍杀动作与结算接口目前处于 [方案设计](docs/MC_DEATHBLOW_DESIGN.md) 阶段，尚未替代自动扣红点。后续 GitHub 提交和推送仍需先经过用户游戏测试及上传授权。中文一键安装程序已提供 Forge/Fabric 选择及记事本教程；下方原脚本流程仍用于 Fabric 部署。
+2026-10-11 更新修复起伏地形与高低平台上的 MC 生物掉入地下，Fabric 与 Forge 均由用户测试通过并授权发布。此前更新补充第三人称下蹲与武器动画合成、可保存的姿态条显示开关，并扩大受击特效深度保护范围。**用户实机反馈受击时 MC 人物和方块仍会闪烁，尚待后续修复。** 本轮已由用户测试并授权上传；各场景覆盖情况与已知问题见 [更新日志](CHANGELOG.md)。MC 自定义忍杀动作与结算接口目前处于 [方案设计](docs/MC_DEATHBLOW_DESIGN.md) 阶段，尚未替代自动扣红点。后续 GitHub 提交和推送仍需先经过用户游戏测试及上传授权。中文一键安装程序已提供 Forge/Fabric 选择及记事本教程；0.1.1 版本升级建议使用安装器；下方原脚本流程用于源码构建后的首次 Fabric 部署。
 
 可下载的桥接安装包和 MC 环境配置包见 [Releases](https://github.com/Xu060113/SekiroCraft-Passthrough/releases)。当前 **Fabric Loader 0.19.5 + Fabric API 0.92.12** 配置、模组的精确版本及原作者下载链接见 [MC 配置与模组](docs/MODPACK.md)。
 
-Forge 1.20.1 独立移植在 `mc-forge/`，以 47.4.10 为构建基准，**preview.6 已由用户在 Forge 47.4.26 游戏中测试通过并授权发布**，含右键黑屏修复、窗口/深度复制性能优化及次元斩绝相机与原粒子适配。本次 **Fabric 发布版本与安装器内的 Fabric DLL/JAR 保留 `v0.1.0-20261010` 原字节，不升级**；原生 Boss 血条位置移动与左右切换也不包含在此次发布中。环境、构建和手动安装见 [Forge 移植说明](docs/FORGE_PORT.md)。
+Forge 1.20.1 独立移植在 `mc-forge/`，以 47.4.10 为构建基准，**preview.7 已由用户在 Forge 47.4.26 游戏中测试通过并授权发布**，含右键黑屏修复、窗口/深度复制性能优化及次元斩绝相机与原粒子适配。本次 **Fabric 同步更新到 0.1.1，包含相同的生物地形修复**。两种加载器保留各自的 JAR；本次复用已发布的 preview.6 原生核心及 JNI，不重新编译只狼端，也不包含本地原生 Boss 血条位置预览与切换。环境、构建和手动安装见 [Forge 移植说明](docs/FORGE_PORT.md)。
 
 
 ## 一键部署（无需编译，推荐新用户）
 
-到 [2026-10-11 Forge 与双加载器安装器发布页](https://github.com/Xu060113/SekiroCraft-Passthrough/releases/tag/v0.1.0-forge-preview.6-20261011)，下载 `SekiroCraft-Installer-0.1.0-20261011.zip`（一键安装包），解压后双击 EXE。旁边的 `先读我-简易教程.txt` 可用记事本打开，程序内也有教程按钮。发布页单独的 `START-HERE-zh-CN.txt` 也是同一份中文教程；附件名使用英文以兼容 GitHub。安装器源码及检查范围见 [安装器验收](docs/INSTALLER_TEST.md)。
+到 [0.1.1 双加载器与安装器发布页](https://github.com/Xu060113/SekiroCraft-Passthrough/releases/tag/v0.1.1-20261011)，下载 `SekiroCraft-Installer-0.1.1-20261011.zip`（一键安装包），解压后双击 EXE。旁边的 `先读我-简易教程.txt` 可用记事本打开，程序内也有教程按钮。发布页单独的 `START-HERE-zh-CN.txt` 也是同一份中文教程；附件名使用英文以兼容 GitHub。安装器源码及检查范围见 [安装器验收](docs/INSTALLER_TEST.md)。
 
 | 所选加载器 | 先在启动器准备 | 本次安装内容 |
 | --- | --- | --- |
-| Forge（默认选项） | MC 1.20.1 + Forge 47.4.26，运行一次后退出；Java 17 | 已测试 preview.6 JAR + 配套只狼 DLL；不安装 Fabric API |
-| Fabric | MC 1.20.1 + Fabric Loader，建议 0.19.5；Java 21，最低 17 | 原已发布 0.1.0 DLL/JAR + API 0.92.12+1.20.1，版本不变 |
+| Forge（默认选项） | MC 1.20.1 + Forge 47.4.26，运行一次后退出；Java 17 | 已测试 0.1.1-forge-preview.7 JAR + 配套只狼 DLL；不安装 Fabric API |
+| Fabric | MC 1.20.1 + Fabric Loader，建议 0.19.5；Java 21，最低 17 | 已测试 Fabric 0.1.1 JAR + 配套只狼 DLL + API 0.92.12+1.20.1 |
 
 1. 正常退出两款游戏及启动器。只狼目录选含 `sekiro.exe` 的文件夹。
 2. 选择 **Forge 或 Fabric**，从启动器打开该实例的实际游戏目录，选择含 `mods` 的目录。Forge 只支持已有实例；官方启动器新建独立配置选项仅用于 Fabric。不要把两种加载器的模组混放。
@@ -39,7 +39,7 @@ Forge 1.20.1 独立移植在 `mc-forge/`，以 47.4.10 为构建基准，**previ
 | MC 操作 | 移动、跳跃、疾跑、潜行、创造飞行、背包、合成、方块、红石、第一/第三人称由真实 MC 处理 |
 | 下蹲与姿态条 | 下蹲修复保留 MC 姿态与碰撞规则，并在武器动画之后合成第三人称下蹲；`/sekirobridge stamina on/off/toggle` 控制桥接姿态条显示并保存设置，见 [验收步骤](docs/CROUCH_HUD_TEST.md) |
 | F5 人物显示 | 匹配枪械模组修改后的实际深度格式，避免世界层复制失败；回归步骤见 [F5 验收](docs/F5_RENDER_TEST.md) |
-| 原生地面 | 采样附近地面，支持放置第一块方块、生物蛋以及附近 MC 实体的地面碰撞 |
+| 原生地面 | 玩家附近地面用于放置；MC 生物、TNT、掉落物和下落方块按自身足底高度查询碰撞层，未采样时暂停移动，确认悬崖后正常下落；见 [地形说明](docs/ENTITY_TERRAIN.md) |
 | 投射物 | MC 方块和实体命中保留；原生场景使用射线检测，敌人通过不可见 MC 代理接收命中 |
 | 战斗 | MC 近战、投射物、爆炸和敌对怪物可向附近原生敌人传递伤害；原生姿态和玩家 HP 参与同步 |
 | 大型敌人受击 | 主模型骨骼包围盒随动画更新，用于多部位射线、范围和距离判定；装配模型及特殊分离部件未全部覆盖，见 [受击框说明](docs/BOSS_HITBOX_TEST.md) |
@@ -96,10 +96,10 @@ $env:Path = "$env:JAVA_HOME\bin;$env:Path"
 | --- | --- |
 | `dist/SekiroCraft-Passthrough/dinput8.dll` | 只狼端模组 |
 | `dist/SekiroCraft-Passthrough/minecraft/` | MC 模组 JAR（含 JNI）和 Fabric API |
-| `dist/SekiroCraft-Passthrough-0.1.0.zip` | 本地打包结果 |
+| `dist/SekiroCraft-Passthrough-0.1.1.zip` | 本地打包结果 |
 | `build/verification.json` | 构建检查结果、协议和文件 SHA256 |
 
-Git 仓库提供源码；[Releases](https://github.com/Xu060113/SekiroCraft-Passthrough/releases) 提供成对的 DLL/JAR 安装包及 `.mrpack` 环境配置包，不包含游戏文件。安装包保留更新器需要的 `dist`、`build/verification.json` 和根目录 `scripts`，可以在解压后的根目录按下面步骤安装。源码用户先完成构建，不能只复制 ZIP 内的脚本单独执行。
+Git 仓库提供源码；[Releases](https://github.com/Xu060113/SekiroCraft-Passthrough/releases) 提供成对的 DLL/JAR 安装包及 `.mrpack` 环境配置包，不包含游戏文件。0.1.1 的手动 ZIP 使用平铺文件，按 [地形说明中的更新步骤](docs/ENTITY_TERRAIN.md) 复制对应加载器 JAR 和配套 DLL；新手使用一键安装器。历史 ZIP 的目录与脚本布局不同，不要对新的平铺包运行旧更新器。源码用户先完成构建，不能只复制脚本单独执行。
 
 ## Fabric 原脚本部署
 
@@ -257,6 +257,7 @@ git pull --ff-only
 | [CROUCH_HUD_TEST.md](docs/CROUCH_HUD_TEST.md) | 桥接第三人称下蹲、姿态条显示开关与受击闪烁验收 |
 | [BOSS_HITBOX_TEST.md](docs/BOSS_HITBOX_TEST.md) | 大型敌人动画部位受击判定与回退行为 |
 | [SWORD_EFFECT_TEST.md](docs/SWORD_EFFECT_TEST.md) | 拔刀剑加法剑气的画面合成与遮挡 |
+| [ENTITY_TERRAIN.md](docs/ENTITY_TERRAIN.md) | 生物坡地碰撞、分层采样与 0.1.1 更新步骤 |
 | [MODPACK.md](docs/MODPACK.md) | 当前 Fabric 版本、模组下载、环境配置包与升级步骤 |
 | [F5_RENDER_TEST.md](docs/F5_RENDER_TEST.md) | 第三人称人物与枪械深度格式回归 |
 | [MOD_INPUT_TEST.md](docs/MOD_INPUT_TEST.md) | R 换弹、Caps Lock 与鼠标侧键 |

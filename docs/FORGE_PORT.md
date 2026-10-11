@@ -1,6 +1,6 @@
 # Forge 1.20.1 独立移植预览
 
-这是独立的 Forge 构建，原来的 `mc/` Fabric 工程保留。**preview.6 已由用户在 Forge 47.4.26 游戏中测试通过，2026-10-11 授权发布。** Fabric 发布载荷本次不更新；其它设备与模组组合仍需分别验证。
+这是独立的 Forge 构建，原来的 `mc/` Fabric 工程保留。**0.1.1-forge-preview.7 已由用户在 Forge 47.4.26 游戏中测试通过，2026-10-11 授权发布。** Fabric 同步更新为 0.1.1，并有本轮独立验收。新增 [生物分层地形修复](ENTITY_TERRAIN.md)；其它设备与模组组合仍需分别验证。
 
 ## 环境
 
@@ -15,9 +15,9 @@
 ## 测试安装
 
 1. 在启动器里新建 **1.20.1 + Forge 47.4.26** 的独立实例，开启版本隔离。先不加其他模组，运行到主菜单后正常退出。
-2. 将 `sekiro-minecraft-passthrough-forge-0.1.0-forge-preview.6.jar` 放进该实例的 `mods`，移走旧的 Forge 桥接 JAR，避免同时安装两个版本。不要把 Fabric 版桥接 JAR 或 Fabric API 放进去。
+2. 将 `sekiro-minecraft-passthrough-forge-0.1.1-forge-preview.7.jar` 放进该实例的 `mods`，移走旧的 Forge 桥接 JAR，避免同时安装两个版本。不要把 Fabric 版桥接 JAR 或 Fabric API 放进去。
 3. 保留现有 Fabric 实例和存档。测试用新的本地单人世界，不要直接用生产存档验证跨加载器迁移。
-4. preview.6 必须成对更新：两款游戏正常退出后，备份只狼目录的旧 `dinput8.dll`，替换为预览 ZIP 中配套的 `dinput8.dll`；保留当前 `sekirobridge.ini`。首次手动安装才将 ZIP 的默认配置一同放入只狼目录。只更换 JAR 无法支持技能相机倾斜，桥接会提示只狼端版本过旧。检查配置的 `channel` 与 MC 的 `sekirobridge/bridge.properties` 一致，默认都是 `default`。完整 MC 忍杀尚未实现，建议 `native_hits=1` 和 `auto_boss_phases=1` 开启耗尽血量扣红点；默认配置仍为关闭。正常玩只狼时关闭桥接及该模式，或恢复旧 DLL；新手建议使用一键安装程序设置。
+4. 完整部署必须使用同一发布提供的 DLL/JAR；preview.7 复用 preview.6 原生 DLL。已经正确安装 preview.6 配套 DLL 的用户，本轮只需替换并移走旧桥接 JAR；首次或从更旧版本升级时：两款游戏正常退出后，备份只狼目录的旧 `dinput8.dll`，替换为预览 ZIP 中配套的 `dinput8.dll`；保留当前 `sekirobridge.ini`。首次手动安装才将 ZIP 的默认配置一同放入只狼目录。只更换 JAR 无法支持技能相机倾斜，桥接会提示只狼端版本过旧。检查配置的 `channel` 与 MC 的 `sekirobridge/bridge.properties` 一致，默认都是 `default`。完整 MC 忍杀尚未实现，建议 `native_hits=1` 和 `auto_boss_phases=1` 开启耗尽血量扣红点；默认配置仍为关闭。正常玩只狼时关闭桥接及该模式，或恢复旧 DLL；新手建议使用一键安装程序设置。
 5. 启动两端并进入场景。MC 内输入 `/sekirobridge status` 查看 JNI 状态，输入 `/sekirobridge on` 启用。
 6. 操作沿用 Fabric 版：WASD、跳跃、背包、鼠标、F5；M 仅转发钩索，需与只狼绑定一致。`/sekirobridge off` 解除桥接，F8 暂停桥接输入，F6 进入只狼菜单输入。
 7. `/sekirobridge hud` 恢复第一人称手臂和原版 HUD；`/sekirobridge stamina on|off|toggle` 控制独立姿态条。
@@ -83,4 +83,4 @@ Forge 的 Mixin 0.8.5 不支持对默认接口方法的原注入方式，地形�
 
 在项目根目录运行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-forge.ps1`。首次需要下载官方 Forge 与 Loom 依赖；之后可加 `-Offline`。
 
-脚本复用当前已构建的配套 JNI，如不存在会先构建原生端。编译原生性能改动时须先执行 `scripts/build-native.ps1`，再执行 Forge 构建脚本。Forge 产物位于 `dist/forge-preview/preview.6/`，包含 JAR、配套 DLL、这份说明、SHA256 和验证记录。可传 `-VixJar` 指向实际 VIX JAR，额外检查其真实后处理注入点；`-RuntimeMixinJar` 可指定启动器使用的 Mixin 0.8.5 JAR，让可选适配启动回归使用实际运行版本。不会安装游戏文件、启动游戏或提交 GitHub。
+脚本复用当前已构建的配套 JNI，如不存在会先构建原生端。编译原生性能改动时须先执行 `scripts/build-native.ps1`，再执行 Forge 构建脚本。Forge 产物位于 `dist/forge-preview/preview.7/`，包含 JAR、配套 DLL、这份说明、SHA256 和验证记录。可传 `-VixJar` 指向实际 VIX JAR，额外检查其真实后处理注入点；`-RuntimeMixinJar` 可指定启动器使用的 Mixin 0.8.5 JAR，让可选适配启动回归使用实际运行版本。不会安装游戏文件、启动游戏或提交 GitHub。

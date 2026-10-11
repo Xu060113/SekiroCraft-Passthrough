@@ -76,7 +76,8 @@ if($SlashBladeJar){
 & java '-cp' $verificationClasspath "$projectRoot\tests\MixinTargets.java" $gameJar.FullName "$projectRoot\mc\build\classes\java\main\dev\sekirobridge\mixin"
 if($LASTEXITCODE){throw 'Minecraft injection target verification failed'}
 $productionGame=Get-ChildItem -LiteralPath "$projectRoot\.cache\gradle-home\caches\fabric-loom\minecraftMaven\net\minecraft\minecraft-merged-intermediary" -Recurse -File -Filter '*.jar'|Select-Object -First 1
-$productionMod=Join-Path $projectRoot 'mc\build\libs\sekiro-minecraft-passthrough-0.1.0.jar'
+$modVersion=(@(Get-Content -LiteralPath "$projectRoot\mc\gradle.properties" | Where-Object {$_ -match '^mod_version='})[0] -split '=',2)[1].Trim()
+$productionMod=Join-Path $projectRoot "mc\build\libs\sekiro-minecraft-passthrough-$modVersion.jar"
 if(!$productionGame -or !(Test-Path -LiteralPath $productionMod)){throw 'Production game or remapped mod missing'}
 $proxyArgs=@($productionMod);if($SlashBladeJar){$proxyArgs+=$SlashBladeJar}
 & java '-cp' $verificationClasspath "$projectRoot\tests\SlashBladeTargets.java" @proxyArgs

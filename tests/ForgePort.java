@@ -32,7 +32,9 @@ public final class ForgePort {
             var metadata=text(jar,"META-INF/mods.toml");
             require(metadata.contains("javafml") && metadata.contains("modId=\"sekirobridge\""),"Forge loader metadata");
             require(metadata.contains("[1.20.1,1.20.2)") && metadata.contains("[47.4.10,48)"),"pinned MC/Forge ranges");
-            require(!metadata.contains("${version}") && metadata.contains("forge-preview.6"),"version expanded");
+            String expectedVersion=args.length>4?args[4]:Path.of(args[0]).getFileName().toString()
+                .replace("sekiro-minecraft-passthrough-forge-","").replace(".jar","");
+            require(!metadata.contains("${version}") && metadata.contains("version=\""+expectedVersion+"\""),"declared version expanded into production metadata");
             var pack=JsonParser.parseString(text(jar,"pack.mcmeta")).getAsJsonObject().getAsJsonObject("pack");
             require(pack.get("pack_format").getAsInt()==15,"MC 1.20.1 resource pack metadata");
             require("sekirobridge.mixins.json,sekirobridge-forge-compat.mixins.json".equals(jar.getManifest().getMainAttributes().getValue("MixinConfigs")),"Mixin bootstrap manifest");
@@ -68,6 +70,13 @@ public final class ForgePort {
             var bridge=read(jar,"dev/sekirobridge/BridgeClient");
             require(calls(bridge,"net/minecraftforge/client/event/RegisterClientCommandsEvent","getDispatcher"),"client-only commands use Forge dispatcher");
             require(calls(bridge,"dev/sekirobridge/NativeBridge","close"),"native session shutdown path");
+            var terrain=read(jar,"dev/sekirobridge/NativeTerrain");
+            require(calls(terrain,"dev/sekirobridge/EntityTerrain","update"),"mob motion resolves its own native floor before moving");
+            require(calls(terrain,"dev/sekirobridge/EntityTerrain","read"),"collision queries share authoritative mob floor observations");
+            var entityTerrain=read(jar,"dev/sekirobridge/EntityTerrain");
+            require(calls(entityTerrain,"dev/sekirobridge/ProjectileTerrain","request"),"mob floor probes use existing client-transport ray queue");
+            require(calls(entityTerrain,"dev/sekirobridge/ProjectileTerrain","contact"),"mob sampling distinguishes native misses from missing responses");
+            require(!calls(entityTerrain,"dev/sekirobridge/NativeBridge","projectileRays"),"server movement cannot perform JNI transport directly");
             try(var runtime=new JarFile(args[3])){
                 var collision=read(jar,"dev/sekirobridge/mixin/CollisionViewMixin");
                 var getter=read(runtime,"net/minecraft/world/level/CollisionGetter");

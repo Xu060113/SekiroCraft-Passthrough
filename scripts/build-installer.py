@@ -1,4 +1,4 @@
-"""Build a dual-loader installer, freezing Fabric to its existing paired release."""
+"""Build a dual-loader installer from verified bundles with separate gameplay records."""
 import argparse
 import hashlib
 import json
@@ -26,8 +26,10 @@ def write_zip(path, files):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag", default="v0.1.0-20261010")
-    parser.add_argument("--version", default="0.1.0-20261011")
-    parser.add_argument("--forge-bundle", type=Path, default=Path("dist/SekiroCraft-Forge-1.20.1-preview.6.zip"))
+    parser.add_argument("--version", default="0.1.1-20261011")
+    parser.add_argument("--forge-bundle", type=Path, required=True)
+    parser.add_argument("--fabric-bundle", type=Path, help="New verified Fabric bundle; otherwise retain the source release")
+    parser.add_argument("--fabric-game-tested", action="store_true", help="Explicit user confirmation for the new Fabric pair")
     parser.add_argument("--forge-game-tested", action="store_true", help="Record explicit user confirmation of this Forge pair")
     parser.add_argument("--fabric-profile", type=Path, required=True)
     parser.add_argument("--game-exe", type=Path, default=Path("D:/Steam/steamapps/common/Sekiro/sekiro.exe"))
@@ -51,36 +53,66 @@ def main():
             if digest(data) != expected.get(name):
                 raise RuntimeError("Unverified release bytes: " + name)
             files[Path(name).name] = data
-    forge_jar = "sekiro-minecraft-passthrough-forge-0.1.0-forge-preview.6.jar"
     forge_native = "forge-dinput8.dll"
-    # These are the exact preview.6 bytes tested by the user, before the local
-    # Boss HUD position experiment. Never use a newly built dist DLL here.
-    forge_hashes = {
-        "dinput8.dll": "00368afc9073e42fe3ea2b73bc919f1789b9a51f6ffd5dd81ead2a2ac074ae92",
-        forge_jar: "13bd5c99562d2fa8fa62e2593bad356e44bacd7c54dccb6fc7dee64b74f36ce2",
-    }
+    def verified_bundle(path, receipt_name, jar_prefix):
+        path = path if path.is_absolute() else root / path
+        with zipfile.ZipFile(path) as archive:
+            receipt = json.loads(archive.read(receipt_name))
+            if receipt.get("protocol", receipt.get("abi")) != 3 or receipt.get("bossHudPositionIncluded", False):
+                raise RuntimeError("Expected a verified v3 bundle without the local Boss HUD experiment")
+            jars = [name for name in archive.namelist() if name.startswith(jar_prefix) and name.endswith(".jar") and "/" not in name]
+            if len(jars) != 1:
+                raise RuntimeError("Expected one loader-specific bridge JAR")
+            jar = jars[0]
+            selected = {name: archive.read(name) for name in ("dinput8.dll", jar)}
+            from io import BytesIO
+            with zipfile.ZipFile(BytesIO(selected[jar])) as mod:
+                is_forge = jar_prefix.endswith("forge-")
+                if (is_forge and "META-INF/mods.toml" not in mod.namelist()) or (not is_forge and "fabric.mod.json" not in mod.namelist()):
+                    raise RuntimeError("Bridge JAR belongs to the wrong loader")
+                if not is_forge and json.loads(mod.read("fabric.mod.json"))["id"] != "sekirobridge":
+                    raise RuntimeError("Unexpected Fabric mod identity")
+                if digest(mod.read("native/windows-x64/sekirobridge-jni.dll")).lower() != receipt["jniSha256"].lower():
+                    raise RuntimeError("Embedded JNI differs from loader verification")
+            for name, expected_hash in {"dinput8.dll": receipt["pairedNativeSha256"], jar: receipt["jarSha256"]}.items():
+                if digest(selected[name]).lower() != expected_hash.lower():
+                    raise RuntimeError("Payload differs from verification receipt: " + name)
+            if digest(selected["dinput8.dll"]).lower() != "00368afc9073e42fe3ea2b73bc919f1789b9a51f6ffd5dd81ead2a2ac074ae92":
+                raise RuntimeError("Native payload differs from the approved preview.6 core")
+            if "boss_hud" in archive.read("sekirobridge.ini").decode("utf-8-sig"):
+                raise RuntimeError("Unreleased Boss HUD config included")
+            return receipt, jar, selected
     forge_path = args.forge_bundle if args.forge_bundle.is_absolute() else root / args.forge_bundle
-    with zipfile.ZipFile(forge_path) as archive:
-        forge_receipt = json.loads(archive.read("forge-verification.json"))
-        if forge_receipt.get("protocol", forge_receipt.get("abi")) != 3:
-            raise RuntimeError("Forge bundle protocol must be v3")
-        for name, expected_hash in forge_hashes.items():
-            data = archive.read(name)
-            if digest(data).lower() != expected_hash:
-                raise RuntimeError("Forge payload differs from the tested preview.6 pair: " + name)
-            files[forge_native if name == "dinput8.dll" else name] = data
+    forge_receipt, forge_jar, forge_files = verified_bundle(forge_path, "forge-verification.json", "sekiro-minecraft-passthrough-forge-")
+    if args.forge_game_tested and not forge_receipt.get("userGameTested"):
+        raise RuntimeError("Forge user confirmation missing from bundle receipt")
+    for name, data in forge_files.items():
+        files[forge_native if name == "dinput8.dll" else name] = data
+    fabric_receipt = verification
+    fabric_version = "0.1.0"
+    if args.fabric_bundle:
+        fabric_receipt, new_jar, fabric_files = verified_bundle(args.fabric_bundle, "fabric-verification.json", "sekiro-minecraft-passthrough-")
+        if args.fabric_game_tested and not fabric_receipt.get("userGameTested"):
+            raise RuntimeError("Fabric user confirmation missing from bundle receipt")
+        files.pop(jar_name)
+        jar_name = new_jar
+        files.update(fabric_files)
+        fabric_version = fabric_receipt["version"]
     profile = args.fabric_profile.read_bytes()
     meta = json.loads(profile)
     if meta.get("inheritsFrom") != "1.20.1" or meta.get("mainClass") != "net.fabricmc.loader.impl.launch.knot.KnotClient" or "net.fabricmc:fabric-loader:0.19.5" not in [lib["name"] for lib in meta["libraries"]]:
         raise RuntimeError("Unexpected upstream Fabric profile")
     files["fabric-profile.json"] = profile
     files["简易教程.txt"] = (root / "installer/简易教程.txt").read_text(encoding="utf-8-sig").replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8-sig")
-    info = {"version": version + "-setup-preview", "sourceCommit": verification["sourceCommit"],
+    fabric_tested = args.fabric_game_tested if args.fabric_bundle else True
+    info = {"version": version, "sourceCommit": forge_receipt["sourceCommit"],
             "gameSha256": verification["gameSha256"], "jarName": jar_name, "apiName": api_name,
             "forgeJarName": forge_jar, "forgeNativeName": forge_native,
-            "fabricSourceTag": args.tag, "fabricUnchanged": True, "forgeVersion": "preview.6",
+            "fabricSourceTag": args.tag if not args.fabric_bundle else fabric_receipt.get("releaseTag", "local-preview"),
+            "fabricUnchanged": not bool(args.fabric_bundle), "fabricVersion": fabric_version, "forgeVersion": forge_receipt.get("version", "preview.6"),
+            "fabricGameTested": fabric_tested,
             "forgeGameTested": args.forge_game_tested, "bossHudPositionIncluded": False,
-            "gameTested": args.forge_game_tested, "flickerResolved": False, "files": {name: digest(data) for name, data in files.items()}}
+            "gameTested": args.forge_game_tested and fabric_tested, "flickerResolved": False, "files": {name: digest(data) for name, data in files.items()}}
     files["bundle.json"] = (json.dumps(info, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
     build = root / "build/installer"
     output = root / "dist/installer" / version

@@ -54,7 +54,7 @@ if($LASTEXITCODE){throw 'Forge post effect fixture compilation failed'}
 Invoke-ForgeCheck 'Forge full-screen post effect isolation' @('-cp',"$glTests;$classpath",'dev.sekirobridge.ForgePostEffectsGl')
 Invoke-ForgeCheck 'Forge final camera and roll' @('-cp',"$glTests;$classpath",'dev.sekirobridge.ForgeRenderedCamera')
 Invoke-ForgeCheck 'Native AAA particle geometry and coverage depth' @('-cp',"$glTests;$classpath",'dev.sekirobridge.ForgeParticleDepthGl',$jni)
-foreach($test in @('TerrainSelfTest','ActorShapeSelfTest','ActorPartsSelfTest')){
+foreach($test in @('TerrainSelfTest','EntityTerrainSelfTest','ActorShapeSelfTest','ActorPartsSelfTest')){
     Invoke-ForgeCheck $test @('-cp',$classpath,"dev.sekirobridge.$test")
 }
 $mappedGame=@($classpath.Split(';') | Where-Object { [IO.Path]::GetFileName($_) -like '*minecraft-merged*.jar' -and $_ -notlike '*sources*' })
@@ -64,7 +64,7 @@ if(!$RuntimeGameJar){
     if($candidate.Count -ne 1){throw 'Pass -RuntimeGameJar with the exact Forge 47.4.10 patched SRG game JAR.'}
     $RuntimeGameJar=$candidate[0].FullName
 }
-Invoke-ForgeCheck 'Forge production artifact and lifecycle' @('-cp',$verificationClasspath,"$projectRoot\tests\ForgePort.java",$jar,$jni,$mappedGame[0],$RuntimeGameJar)
+Invoke-ForgeCheck 'Forge production artifact and lifecycle' @('-cp',$verificationClasspath,"$projectRoot\tests\ForgePort.java",$jar,$jni,$mappedGame[0],$RuntimeGameJar,$modVersion)
 Invoke-ForgeCheck 'Forge-patched named injection points' @('-cp',$verificationClasspath,"$projectRoot\tests\MixinTargets.java",$mappedGame[0],"$classes\dev\sekirobridge\mixin")
 Invoke-ForgeCheck 'Forge production SRG injection points' @('-cp',$verificationClasspath,"$projectRoot\tests\MixinTargets.java",$RuntimeGameJar,$jar)
 if($VixJar){

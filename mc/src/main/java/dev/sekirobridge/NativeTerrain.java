@@ -13,7 +13,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.WeakHashMap;
 
 public final class NativeTerrain {
     private record Snapshot(long epoch,UUID player,List<TerrainGeometry.Surface> surfaces,
@@ -21,7 +20,6 @@ public final class NativeTerrain {
     private static volatile Snapshot snapshot;
     private static final TerrainGeometry geometry=new TerrainGeometry();
     private static final ByteBuffer packet=Protocol.direct(448);
-    private static final Map<Entity,TerrainEntityPolicy.Wait> waits=new WeakHashMap<>();
     private NativeTerrain(){}
     private static Snapshot create(Protocol.State state,List<TerrainGeometry.Surface> surfaces,
         Map<TerrainGeometry.Key,Long> known){
@@ -35,10 +33,10 @@ public final class NativeTerrain {
     static void seed(Protocol.State state,Vec3d position){
         geometry.clear();
         // Wait for observed terrain (which can be empty) instead of inventing a startup floor.
-        synchronized(waits){waits.clear();}
+        EntityTerrain.clear();
         snapshot=create(state,List.of(),Map.of());
     }
-    static void clear(){snapshot=null;geometry.clear();synchronized(waits){waits.clear();}}
+    static void clear(){snapshot=null;geometry.clear();EntityTerrain.clear();}
     static void poll(Protocol.State state){
         var client=MinecraftClient.getInstance();
         if(client.player==null || (state.capabilities()&512)==0 || !NativeBridge.terrain(BridgeClient.handle(),packet))return;
@@ -67,8 +65,16 @@ public final class NativeTerrain {
     /** Read-only native support query for footsteps and other contact feedback. */
     public static boolean supports(Entity entity){
         var current=available();
-        return applies(current,entity) && TerrainGeometry.supports(entity.getBoundingBox(),current.surfaces(),
+        return applies(current,entity) && TerrainGeometry.supports(entity.getBoundingBox(),surfaces(current,entity),
             NativeBridge.clockMs(),.1*current.spacing());
+    }
+    private static boolean local(Snapshot current,Entity entity){
+        return !entity.getUuid().equals(current.player()) &&
+            EntityTerrain.near(entity,current.playerPosition(),current.spacing()*2);
+    }
+    private static List<TerrainGeometry.Surface> surfaces(Snapshot current,Entity entity){
+        return local(current,entity)?EntityTerrain.read(entity,entity.getBoundingBox(),current.spacing(),
+            NativeBridge.clockMs()).surfaces():current.surfaces();
     }
     public static Iterable<VoxelShape> add(Object world,Entity entity,Box query,Iterable<VoxelShape> original){
         var current=available();
@@ -77,7 +83,7 @@ public final class NativeTerrain {
         boolean poseProbe=entity instanceof PlayerEntity && entity.getUuid().equals(current.player()) &&
             TerrainPoseProbe.active(entity);
         ArrayList<VoxelShape> shapes=null;
-        for(var surface:current.surfaces())if(TerrainGeometry.retained(now,surface.tick()) && surface.box().intersects(query)){
+        for(var surface:surfaces(current,entity))if(TerrainGeometry.retained(now,surface.tick()) && surface.box().intersects(query)){
             if(poseProbe && !TerrainGeometry.blocksPose(surface,entity.getBoundingBox(),query,now,entity.getStepHeight()))continue;
             if(shapes==null){shapes=new ArrayList<>();for(var shape:original)shapes.add(shape);}
             shapes.add(VoxelShapes.cuboid(surface.box()));
@@ -86,21 +92,21 @@ public final class NativeTerrain {
     }
     /** Unknown terrain waits for a sample; a confirmed ray miss remains ordinary open space. */
     public static boolean beforeMove(Entity entity,Vec3d movement){
+        var previous=snapshot;
+        if(applies(previous,entity) && BridgeClient.armed() && BridgeClient.loading() && local(previous,entity)){
+            entity.setVelocity(Vec3d.ZERO);entity.fallDistance=0;return true;
+        }
         var current=available();
         if(!applies(current,entity) || entity.isSpectator() || (entity.noClip && !(entity instanceof ItemEntity)))return false;
         long now=NativeBridge.clockMs();
         boolean known=TerrainGeometry.covers(current.known(),current.spacing(),entity.getBoundingBox().stretch(movement),now);
         boolean ownPlayer=entity.getUuid().equals(current.player());
         boolean hold=!known && ownPlayer;
-        if(!ownPlayer){
-            boolean nearby=entity.getPos().squaredDistanceTo(current.playerPosition())<=
-                TerrainEntityPolicy.ENTITY_WAIT_RADIUS*TerrainEntityPolicy.ENTITY_WAIT_RADIUS &&
-                TerrainGeometry.touchesKnown(current.known(),current.spacing(),
-                    entity.getBoundingBox().expand(current.spacing()*2),now);
-            synchronized(waits){
-                if(known || !nearby)waits.remove(entity);
-                else hold=waits.computeIfAbsent(entity,key -> new TerrainEntityPolicy.Wait()).hold(false,true,now);
-            }
+        List<TerrainGeometry.Surface> support=current.surfaces();
+        if(local(current,entity)){
+            var footing=EntityTerrain.update(entity,entity.getBoundingBox().stretch(movement),current.spacing(),
+                current.epoch(),now,!entity.getWorld().isClient || current.scope().serverWorld()==null);
+            known=footing.known();hold=!known;support=footing.surfaces();
         }
         if(hold){
             entity.setVelocity(Vec3d.ZERO);entity.fallDistance=0;
@@ -111,7 +117,7 @@ public final class NativeTerrain {
             movement.y>0.04 || entity.getVelocity().y>0.04)return false;
         double recoveryLimit=entity instanceof net.minecraft.entity.LivingEntity?
             Math.min(.6,entity.getStepHeight()):.25;
-        double rise=TerrainGeometry.recovery(entity.getBoundingBox(),current.surfaces(),now,recoveryLimit);
+        double rise=TerrainGeometry.recovery(entity.getBoundingBox(),support,now,recoveryLimit);
         if(rise<=0)return false;
         var raised=entity.getBoundingBox().offset(0,rise+1e-6,0);
         if(!entity.getWorld().isSpaceEmpty(entity,raised))return false;

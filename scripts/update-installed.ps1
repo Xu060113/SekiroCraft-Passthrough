@@ -31,10 +31,14 @@ $gameRoot=[IO.Path]::GetFullPath($record.gameDirectory)
 $mcRoot=[IO.Path]::GetFullPath($MinecraftDirectory)
 if($manifest.gameSha256 -and (Get-FileHash -LiteralPath (Join-Path $gameRoot 'sekiro.exe')).Hash -ne $manifest.gameSha256){throw 'Verified Sekiro executable changed.'}
 $dllTarget=Join-Path $gameRoot 'dinput8.dll'
-$jarTarget=Join-Path $mcRoot 'mods\sekiro-minecraft-passthrough-0.1.0.jar'
+$jarEntries=@($manifest.files | Where-Object {$_.name -match '^minecraft[\\/]sekiro-minecraft-passthrough-[^\\/]+\.jar$' -and $_.name -notmatch '-forge-'})
+if($jarEntries.Count -ne 1){throw 'Expected one verified Fabric JAR in the package.'}
+$jarName=[IO.Path]::GetFileName($jarEntries[0].name.Replace('/','\'))
+$jarTarget=Join-Path $mcRoot ('mods\'+$jarName)
+if(!(Test-Path -LiteralPath $jarTarget)){throw 'Prepare the matching Fabric version first. For cross-version upgrades use the Chinese installer, which backs up and removes old JAR names.'}
 $configTarget=Join-Path $gameRoot 'sekirobridge.ini'
 $dllSource=Join-Path $packageRoot 'dinput8.dll'
-$jarSource=Join-Path $packageRoot 'minecraft\sekiro-minecraft-passthrough-0.1.0.jar'
+$jarSource=Join-Path $packageRoot ('minecraft\'+$jarName)
 foreach($file in $record.files){
     if((Get-FileHash -LiteralPath (Join-Path $gameRoot $file.name)).Hash -ne $file.sha256){throw "Installed file changed: $($file.name)"}
 }
@@ -140,7 +144,7 @@ try {
     Write-Output "Paired $($manifest.patch) update installed and verified. Backup: $backupRoot. No game launched."
 } catch {
     Copy-Item -LiteralPath (Join-Path $backupRoot 'dinput8.dll') -Destination $dllTarget -Force
-    Copy-Item -LiteralPath (Join-Path $backupRoot 'sekiro-minecraft-passthrough-0.1.0.jar') -Destination $jarTarget -Force
+    Copy-Item -LiteralPath (Join-Path $backupRoot $jarName) -Destination $jarTarget -Force
     Copy-Item -LiteralPath (Join-Path $backupRoot 'installation.json') -Destination $recordPath -Force
     Copy-Item -LiteralPath (Join-Path $backupRoot 'sekirobridge.ini') -Destination $configTarget -Force
     if(Test-Path -LiteralPath (Join-Path $backupRoot 'combat-trace-session.json')){

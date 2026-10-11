@@ -37,7 +37,8 @@ namespace SekiroCraftSetup {
             var loaderRow=new FlowLayoutPanel { Dock=DockStyle.Fill,WrapContents=false };
             loaderRow.Controls.Add(new Label { Text="MC 加载器",AutoSize=true,Margin=new Padding(0,8,26,0) });
             loader.DropDownStyle=ComboBoxStyle.DropDownList;loader.Width=610;
-            loader.Items.AddRange(new object[]{"Forge · MC 1.20.1 / 47.4.26 已测试 · preview.6（无血条位置切换）","Fabric · MC 1.20.1 / Loader 0.19.5 · 保留已发布 0.1.0"});
+            loader.Items.AddRange(new object[]{"Forge · 1.20.1 / 47.4.26 · "+data.Info.forgeVersion+ (data.Info.forgeGameTested?" · 已实测":" · 待实测"),
+                "Fabric · 1.20.1 / Loader 0.19.5 · "+data.Info.fabricVersion+(data.Info.fabricGameTested?" · 已实测":" · 待实测")});
             loaderRow.Controls.Add(loader);panel.Controls.Add(loaderRow,0,4);
             var modeRow=new FlowLayoutPanel { Dock=DockStyle.Fill,WrapContents=false };
             modeRow.Controls.Add(new Label { Text="MC 安装方式",AutoSize=true,Margin=new Padding(0,8,14,0) });

@@ -111,7 +111,7 @@ static class SetupEngineTests {
             var forgeOriginal=Hash(Path.Combine(forge.Sekiro,"dinput8.dll"));var unrelated=Hash(Engine.Under(forge.Minecraft,"mods/其他 Forge 模组.jar"));
             forgeEngine.Check(forge);forgeEngine.Install(forge);
             Check(Hash(Path.Combine(forge.Sekiro,"dinput8.dll"))==Bundle.Hash(bundle.Files[bundle.Info.forgeNativeName]),"Forge gets its exact paired native DLL");
-            Check(Hash(Engine.Under(forge.Minecraft,"mods/"+bundle.Info.forgeJarName))==Bundle.Hash(bundle.Files[bundle.Info.forgeJarName]),"Forge gets tested preview.6 JAR");
+            Check(Hash(Engine.Under(forge.Minecraft,"mods/"+bundle.Info.forgeJarName))==Bundle.Hash(bundle.Files[bundle.Info.forgeJarName]),"Forge gets selected verified JAR");
             Check(!File.Exists(Engine.Under(forge.Minecraft,"mods/"+bundle.Info.jarName)) && !File.Exists(Engine.Under(forge.Minecraft,"mods/"+bundle.Info.apiName)),"Forge never installs Fabric bridge or API");
             Check(!File.Exists(Engine.Under(forge.Minecraft,"mods/旧桥接.jar")) && !File.Exists(Engine.Under(forge.Minecraft,"mods/旧 Forge 桥接.jar")),"Remove duplicate bridge IDs across loaders");
             Check(Hash(Engine.Under(forge.Minecraft,"mods/其他 Forge 模组.jar"))==unrelated,"Keep third-party Forge JAR");
@@ -122,7 +122,7 @@ static class SetupEngineTests {
             forgeEngine.Restore(forge.Sekiro);
             Check(Hash(Path.Combine(forge.Sekiro,"dinput8.dll"))==forgeOriginal && File.Exists(Engine.Under(forge.Minecraft,"mods/旧 Forge 桥接.jar")),"Restore Forge original native and JAR backups");
             Check(!File.Exists(Engine.Under(forge.Minecraft,"mods/"+bundle.Info.forgeJarName)),"Remove owned Forge JAR on restore");
-            forgeEngine.Install(cross); Check(Hash(Path.Combine(forge.Sekiro,"dinput8.dll"))==Bundle.Hash(bundle.Files["dinput8.dll"]),"Loader switch after restore uses frozen Fabric DLL");forgeEngine.Restore(forge.Sekiro);
+            forgeEngine.Install(cross); Check(Hash(Path.Combine(forge.Sekiro,"dinput8.dll"))==Bundle.Hash(bundle.Files["dinput8.dll"]),"Loader switch after restore uses selected Fabric DLL");forgeEngine.Restore(forge.Sekiro);
             var forgeFault=ForgeFixture("Forge 回滚");var failing=TestEngine(forgeFault);var originalForgeDll=Hash(Path.Combine(forgeFault.Sekiro,"dinput8.dll"));
             failing.AfterWrite=delegate(int count){if(count==4)throw new IOException("Forge partial write");};
             Refuses(delegate {failing.Install(forgeFault);},"Forge partial failure injected");
@@ -149,6 +149,30 @@ static class SetupEngineTests {
             var officialForge=ForgeFixture("官方 Forge 不自动新建");officialForge.NewOfficialProfile=true;
             Refuses(delegate {TestEngine(officialForge).Check(officialForge);},"Do not pretend to create Forge loader profile");
             Check(Bundle.Hash(bundle.Files[bundle.Info.forgeNativeName])=="00368AFC9073E42FE3EA2B73BC919F1789B9A51F6FFD5DD81EAD2A2AC074AE92","Exclude untested Boss HUD native DLL");
+            foreach(var selectedLoader in new[]{"Fabric","Forge"}) {
+                var upgrade=selectedLoader=="Forge"?ForgeFixture("Forge 改名升级"):Fixture("Fabric 改名升级");
+                var originalDll=Hash(Path.Combine(upgrade.Sekiro,"dinput8.dll"));
+                var currentName=selectedLoader=="Forge"?bundle.Info.forgeJarName:bundle.Info.jarName;
+                var legacyName=selectedLoader=="Forge"?"sekiro-minecraft-passthrough-forge-0.1.0-forge-preview.6.jar":"sekiro-minecraft-passthrough-0.1.0.jar";
+                if(legacyName==currentName)legacyName=legacyName.Replace(".jar","-previous.jar");
+                var currentBytes=bundle.Files[currentName];var originalVersion=bundle.Info.version;
+                bundle.Files[legacyName]=currentBytes;
+                if(selectedLoader=="Forge")bundle.Info.forgeJarName=legacyName;else bundle.Info.jarName=legacyName;
+                bundle.Info.version="previous-version-fixture";
+                var prior=TestEngine(upgrade);prior.Install(upgrade);
+                Check(File.Exists(Engine.Under(upgrade.Minecraft,"mods/"+legacyName)),"Previous named JAR fixture installed: "+selectedLoader);
+                if(selectedLoader=="Forge")bundle.Info.forgeJarName=currentName;else bundle.Info.jarName=currentName;
+                bundle.Info.version=originalVersion;
+                var next=TestEngine(upgrade);next.Install(upgrade);
+                Check(!File.Exists(Engine.Under(upgrade.Minecraft,"mods/"+legacyName)) && Hash(Engine.Under(upgrade.Minecraft,"mods/"+currentName))==Bundle.Hash(currentBytes),"Version upgrade removes old filename and deploys new JAR: "+selectedLoader);
+                var updateRecord=Bundle.Json.Deserialize<InstallRecord>(File.ReadAllText(Engine.Under(upgrade.Sekiro,Engine.ManagedFolder+"/installation.json")));
+                Check(updateRecord.files.Any(f=>f.root=="mc" && f.name=="mods/"+legacyName && f.installedHash==null) &&
+                    updateRecord.files.Any(f=>f.root=="mc" && f.name=="mods/"+currentName && f.installedHash==Bundle.Hash(currentBytes)),"Both version filenames are tracked for restoration: "+selectedLoader);
+                next.Restore(upgrade.Sekiro);
+                Check(!File.Exists(Engine.Under(upgrade.Minecraft,"mods/"+legacyName)) && !File.Exists(Engine.Under(upgrade.Minecraft,"mods/"+currentName)) &&
+                    Hash(Path.Combine(upgrade.Sekiro,"dinput8.dll"))==originalDll,"Restore returns to before first install across a version upgrade: "+selectedLoader);
+                bundle.Files.Remove(legacyName);
+            }
             Console.WriteLine("PASS "+checks+" isolated dual-loader installer checks: paired deployment, rollback, loader switching, restore, ownership, Chinese paths, preferences and launcher profile. No game launched."); return 0;
         } catch(Exception ex) { Console.Error.WriteLine(ex.ToString()); return 1; }
     }

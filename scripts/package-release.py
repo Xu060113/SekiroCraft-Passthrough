@@ -30,10 +30,12 @@ def write_zip(path, files):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fabric-api", type=Path, required=True)
-    parser.add_argument("--tag", default="v0.1.0-20261009")
+    parser.add_argument("--tag", default="v0.1.1-20261011")
     parser.add_argument("--authorized-on", help="Date of the user's publication authorization (YYYY-MM-DD)")
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
+    mod_version = next(line.split("=",1)[1].strip() for line in (root / "mc/gradle.properties").read_text().splitlines() if line.startswith("mod_version="))
+    jar_name = "sekiro-minecraft-passthrough-" + mod_version + ".jar"
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
     if subprocess.check_output(["git", "status", "--porcelain"], cwd=root):
         raise RuntimeError("Commit the authorized source and documents before packaging")
@@ -51,7 +53,7 @@ def main():
                 for entry in verified["files"]}
     assets = {}
     for name in ("dinput8.dll", "sekirobridge.ini", "MinHook-LICENSE.txt", "ImGui-LICENSE.txt",
-                 "SekiroTool-LICENSE.txt", "minecraft/sekiro-minecraft-passthrough-0.1.0.jar"):
+                 "SekiroTool-LICENSE.txt", "minecraft/" + jar_name):
         data = (package / name).read_bytes()
         if sha(data) != expected.get(name):
             raise RuntimeError(f"Asset differs from verified build: {name}")
@@ -88,7 +90,6 @@ def main():
                    "env": {"client": "required", "server": "unsupported"},
                    "downloads": [mod["download"]], "fileSize": mod["bytes"]} for mod in runtime["mods"]],
     }
-    jar_name = "sekiro-minecraft-passthrough-0.1.0.jar"
     jar = assets[f"minecraft/{jar_name}"]
     pack = {"modrinth.index.json": json_bytes(index), f"client-overrides/mods/{jar_name}": jar,
             "client-overrides/SekiroCraft-SETUP.md": assets["docs/MODPACK.md"]}
